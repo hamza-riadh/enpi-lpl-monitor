@@ -466,7 +466,8 @@ class Notifier:
         self.ntfy_token  = os.getenv("NTFY_TOKEN", "")
         self.email_to    = os.getenv("EMAIL_TO", "")
         self.smtp_host   = os.getenv("SMTP_HOST", "")
-        self.smtp_port   = int(os.getenv("SMTP_PORT", "465"))
+        port_val         = os.getenv("SMTP_PORT", "").strip()
+        self.smtp_port   = int(port_val) if port_val.isdigit() else 465
         self.smtp_user   = os.getenv("SMTP_USER", "")
         self.smtp_pass   = os.getenv("SMTP_PASSWORD", "")
         self.email_from  = os.getenv("EMAIL_FROM", self.smtp_user)
