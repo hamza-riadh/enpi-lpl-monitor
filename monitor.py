@@ -263,11 +263,8 @@ class EnpiFetcher:
                 log.warning("[WARNING] Failed to probe %s: %s", w["label"], e)
 
         if scanned == 0:
-            raise ExtractionError(
-                f"None of the target wilayas matched. Targets: {targets()}. "
-                f"Available (norm): {[norm(w['label']) for w in wilayas[:8]]}"
-            )
-        if failed and len(failed) == scanned:
+            log.info("[INFO] None of target wilayas currently open in dropdown (%d other wilayas open)", len(wilayas))
+        elif failed and len(failed) == scanned:
             raise ExtractionError(f"Every target probe failed: {'; '.join(warnings)[:300]}")
 
         return snap, failed, warnings
