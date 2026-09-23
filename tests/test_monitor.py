@@ -1,0 +1,369 @@
+"""
+ENPI LPL Monitor — Unit Tests
+Uses httpx.MockTransport. No real network calls.
+"""
+import copy, json, sys
+from pathlib import Path
+from urllib.parse import unquote_plus
+import httpx, pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import monitor as m
+m.REQ_DELAY = 0  # zero network delay during unit tests
+
+# ── shared constants ───────────────────────────────────────────────────────
+CSRF = "a" * 64
+WILAYAS = [
+    "1 - Adrar", "2 - Chlef", "9 - Blida", "16 - Alger",
+    "35 - Boumerdes", "42 - Tipaza", "19 - Setif", "25 - Constantine",
+    "23 - Annaba", "15 - Tizi Ouzou", "14 - Tiaret",
+]
+
+
+# ── Fake ENPI site ─────────────────────────────────────────────────────────
+class FakeSite:
+    """data = {norm(wilaya): {project_label: [typologies]}}"""
+
+    def __init__(self, data=None):
+        self.data  = data if data is not None else {
+            "9 - blida":     {"12 Villas Mouzaia": ["F5", "F6"]},
+            "35 - boumerdes":{"86 LOGTS KHEMIS":   ["F3", "F4"]},
+            "42 - tipaza":   {},   # known target wilaya, no projects yet
+            "16 - alger":    {},   # known target wilaya, no projects yet
+        }
+        self.mode  = "ok"
+        self.calls = 0
+
+    def _body(self, req):
+        d = {}
+        if req.content:
+            for pair in req.content.decode().split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    d[k] = unquote_plus(v)   # decode + → space, %20 → space etc.
+        return d
+
+    def handler(self, req: httpx.Request) -> httpx.Response:
+        self.calls += 1
+        path = req.url.path
+
+        # ── main page ──
+        if "Inscription.php" in path:
+            if self.mode == "blocked":
+                return httpx.Response(403, text="Forbidden")
+            if self.mode == "garbage":
+                return httpx.Response(200, text="<html><body><h1>Maintenance</h1></body></html>")
+            if self.mode == "down":
+                raise httpx.ConnectError("boom")
+            opts = "".join(
+                f'<option value="{i+1}">{w}</option>'
+                for i, w in enumerate(WILAYAS)
+            )
+            html = (
+                f'<html><script>window.CONFIG = {{csrfToken: "{CSRF}", lang: "fr"}};</script>'
+                f'<form><select name="wilaya">'
+                f'<option value="">choisir...</option>{opts}'
+                f'</select></form></html>'
+            )
+            return httpx.Response(200, text=html)
+
+        # ── projects API ──
+        if "projet-by-wilaya" in path:
+            if self.mode == "down":
+                raise httpx.ConnectError("boom")
+            if self.mode in ("error_json", "empty"):
+                return httpx.Response(200, text='{"error":"SQL failure"}' if self.mode == "error_json" else "")
+            body = self._body(req)
+            cid  = body.get("country_id", "0")
+            try:
+                w_label = WILAYAS[int(cid) - 1]
+            except (ValueError, IndexError):
+                return httpx.Response(200, text='<option value="">choisir Projet:</option>')
+            w_norm = m.norm(w_label)
+            projs  = self.data.get(w_norm, {})
+            opts   = "".join(f'<option value="proj_{p}">{p}</option>' for p in projs)
+            return httpx.Response(200, text=f'<option value="">choisir Projet:</option>{opts}')
+
+        # ── typologies API ──
+        if "Typologie" in path:
+            if self.mode == "down":
+                raise httpx.ConnectError("boom")
+            if self.mode in ("error_json", "empty"):
+                return httpx.Response(200, text='{"error":"x"}' if self.mode == "error_json" else "")
+            body    = self._body(req)
+            sid     = body.get("state_id", "")
+            p_label = sid.replace("proj_", "") if sid.startswith("proj_") else ""
+            typos   = []
+            for _, projs in self.data.items():
+                if p_label in projs:
+                    typos = projs[p_label]
+                    break
+            opts = "".join(f'<option value="{t}">{t}</option>' for t in typos)
+            return httpx.Response(200, text=f'<option value="">choisir...</option>{opts}')
+
+        return httpx.Response(404, text="Not Found")
+
+
+# ── Fake notifier ──────────────────────────────────────────────────────────
+class FakeNotifier:
+    def __init__(self, ok=True):
+        self.ok   = ok
+        self.sent = []
+
+    def configured(self):
+        return True
+
+    def send(self, item):
+        if self.ok:
+            self.sent.append(item)
+        return self.ok
+
+    def ping_healthcheck(self, suffix=""):
+        pass
+
+
+# ── Test harness ───────────────────────────────────────────────────────────
+class Env:
+    def __init__(self, site=None, notifier=None):
+        self.site     = site or FakeSite()
+        self.notifier = notifier or FakeNotifier()
+        transport     = httpx.MockTransport(self.site.handler)
+        self._client  = httpx.Client(transport=transport, follow_redirects=True)
+        self.fetcher  = m.EnpiFetcher()
+        self.fetcher._open_session = lambda: (self._client, CSRF)
+        self.state    = m._empty_state()
+
+    def run(self):
+        return m.run_once(self.state, self.fetcher, self.notifier)
+
+    @property
+    def sent(self):
+        return self.notifier.sent
+
+
+def types(events):
+    return [e["type"] for e in events]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# TEST CASES
+# ═══════════════════════════════════════════════════════════════════
+
+def test_baseline_no_alert():
+    """First run stores baseline, sends 'started' notice, no change events."""
+    e = Env()
+    evs = e.run()
+    assert evs == []
+    assert len(e.sent) == 1
+    title = e.sent[0]["title"].lower()
+    assert "demarre" in title or "started" in title or "monitor" in title
+
+
+def test_unchanged_no_alert():
+    """Second run with identical data → no events, no alerts."""
+    e = Env()
+    e.run(); e.sent.clear()
+    assert e.run() == []
+    assert e.sent == []
+
+
+def test_new_project_no_typology():
+    """New project with 0 typologies → NEW_PROJECT."""
+    e = Env()
+    e.run(); e.sent.clear()
+    e.site.data["42 - tipaza"] = {"Nouveau Projet Vide": []}
+    ev = e.run()
+    assert types(ev) == ["NEW_PROJECT"]
+
+
+def test_new_project_with_typologies_is_opportunity():
+    """New project with typologies → OPPORTUNITY (priority 5)."""
+    e = Env()
+    e.run(); e.sent.clear()
+    e.site.data["42 - tipaza"] = {"XYZ 120 LOGTS KHEMISTI": ["F3", "F4"]}
+    ev = e.run()
+    assert types(ev) == ["OPPORTUNITY"]
+    body = e.sent[0]["body"]
+    assert "XYZ" in body
+    assert e.sent[0]["priority"] == 5
+
+
+def test_project_gaining_first_typology_is_opportunity():
+    """Project goes from 0 typologies to 1+ → OPPORTUNITY."""
+    e = Env()
+    e.site.data["42 - tipaza"] = {"Later": []}
+    e.run(); e.sent.clear()
+    e.site.data["42 - tipaza"]["Later"] = ["F4"]
+    ev = e.run()
+    assert types(ev) == ["OPPORTUNITY"]
+
+
+def test_new_typology_on_existing_project():
+    """Existing project gains extra typology → NEW_TYPOLOGY."""
+    e = Env()
+    e.run(); e.sent.clear()
+    # Replace the whole list (not append) to avoid mutating shared reference in snapshot
+    e.site.data["9 - blida"]["12 Villas Mouzaia"] = ["F5", "F6", "F3"]
+    ev = e.run()
+    assert types(ev) == ["NEW_TYPOLOGY"]
+    assert "F3" in ev[0]["new_typologies"]
+
+
+def test_no_repeat_alert():
+    """Once alerted, subsequent identical scans are silent."""
+    e = Env()
+    e.run()
+    e.site.data["42 - tipaza"] = {"XYZ": ["F3"]}
+    assert len(e.run()) == 1
+    n = len(e.sent)
+    for _ in range(5):
+        assert e.run() == []
+    assert len(e.sent) == n
+
+
+def test_removal_needs_two_scans():
+    """Removed project is only confirmed after 2 consecutive misses."""
+    e = Env()
+    e.site.data["9 - blida"]["P2"] = ["F3"]
+    e.run(); e.sent.clear()
+    del e.site.data["9 - blida"]["P2"]
+    assert e.run() == []                   # 1st miss: retain trusted data
+    ev = e.run()                           # 2nd miss: confirmed
+    assert types(ev) == ["REMOVED"]
+    txt = (e.sent[-1]["title"] + e.sent[-1]["body"]).lower()
+    assert "non detecte" in txt or "removed" in txt
+    # Alert must flag uncertainty — "non confirme" means it's not declared sold out
+    assert "non confirme" in txt or "non detecte" in txt
+
+
+def test_glitch_then_recovery_no_alert():
+    """Transient 1-scan removal then reappearance → no alert."""
+    e = Env()
+    e.site.data["9 - blida"]["P2"] = ["F3"]
+    e.run(); e.sent.clear()
+    saved = e.site.data["9 - blida"].pop("P2")
+    e.run()   # 1 miss
+    e.site.data["9 - blida"]["P2"] = saved
+    assert e.run() == []
+    assert e.sent == []
+
+
+def test_mass_disappearance_not_believed():
+    """All projects vanishing at once → suspicious, hold off alerts."""
+    e = Env()
+    e.site.data["9 - blida"]["A"] = ["F3"]
+    e.site.data["9 - blida"]["B"] = ["F4"]
+    e.run(); e.sent.clear()
+    e.site.data["9 - blida"]     = {}
+    e.site.data["35 - boumerdes"] = {}
+    for _ in range(5):
+        assert e.run() == []
+    assert e.state["snapshot"] is not None   # trusted data retained
+
+
+def test_website_down_keeps_snapshot():
+    """Connection failure retains trusted snapshot, alerts after threshold."""
+    e = Env()
+    e.run(); e.sent.clear()
+    snap_before = json.dumps(e.state["snapshot"], sort_keys=True)
+    e.site.mode = "down"
+    for _ in range(2):
+        assert e.run() == []
+    assert e.sent == []              # not yet alerted
+    e.run()                          # 3rd failure → MONITORING FAILURE
+    assert len(e.sent) == 1
+    assert "FAILURE" in e.sent[0]["title"].upper() or "MONITOR" in e.sent[0]["title"].upper()
+    e.run(); e.run()
+    assert len(e.sent) == 1         # no repeated alerts
+    assert json.dumps(e.state["snapshot"], sort_keys=True) == snap_before
+    e.site.mode = "ok"
+    e.run()
+    assert "recover" in e.sent[-1]["title"].lower()
+    assert e.state["consecutive_failures"] == 0
+
+
+def test_garbage_html_is_failure_not_change():
+    """Maintenance/garbage page → ExtractionError, snapshot unchanged."""
+    e = Env()
+    e.run(); e.sent.clear()
+    e.site.mode = "garbage"
+    assert e.run() == []
+    assert e.state["consecutive_failures"] == 1
+    assert e.state["snapshot"] is not None   # retained
+
+
+def test_blocked_alerts_immediately():
+    """HTTP 403 (bot-block) → immediate alert, does not retry around it."""
+    e = Env()
+    e.run(); e.sent.clear()
+    e.site.mode = "blocked"
+    e.run()
+    titles = " ".join(x["title"].upper() for x in e.sent)
+    assert "BLOCK" in titles or "FAILURE" in titles or "MONITOR" in titles
+
+
+def test_notification_failure_queues_alert():
+    """Failed send is queued and retried on next run."""
+    n = FakeNotifier(ok=False)
+    e = Env(notifier=n)
+    e.run(); e.state["pending"].clear()
+    e.site.data["42 - tipaza"] = {"XYZ": ["F3"]}
+    e.run()
+    assert len(e.state["pending"]) == 1
+    n.ok = True
+    e.run()
+    assert e.state["pending"] == []
+    assert "OPPORTUNIT" in n.sent[-1]["title"].upper()
+
+
+def test_state_not_written_when_unchanged(tmp_path):
+    """save_state returns False when nothing material changed."""
+    p = tmp_path / "state.json"
+    e = Env()
+    e.run()
+    assert m.save_state(p, e.state) is True
+    e.run()
+    assert m.save_state(p, e.state) is False
+    e.site.data["42 - tipaza"] = {"NEW": ["F3"]}
+    e.run()
+    assert m.save_state(p, e.state) is True
+
+
+def test_norm_accent_fold():
+    assert m.norm("  TIPAZA  ") == "tipaza"
+    assert m.norm("Boumerdès")  == m.norm("BOUMERDES")
+    assert m.norm("16 - Alger") == "16 - alger"
+
+
+def test_parse_options_filters_placeholders():
+    html = '<option value="">Choisir...</option><option value="1">Projet X</option>'
+    result = m._parse_options(html)
+    assert len(result) == 1
+    assert result[0]["label"] == "Projet X"
+
+
+def test_parse_options_json_error_raises():
+    with pytest.raises(m.ExtractionError):
+        m._parse_options('{"error": "SQL failure"}')
+
+
+def test_first_scan_partial_failure_rejects_baseline():
+    """If first scan has failing wilayas, refuse to store incomplete baseline."""
+    e = Env()
+    e.site.mode = "error_json"
+    e.run()
+    assert e.state["snapshot"] is None
+
+
+def test_new_wilaya_appears():
+    """A new wilaya appearing in the dropdown → NEW_WILAYA event."""
+    e = Env()
+    e.run(); e.sent.clear()
+    WILAYAS.append("58 - Nouvelle Wilaya")
+    e.site.data["58 - nouvelle wilaya"] = {}
+    try:
+        ev = e.run()
+        assert any(ev_["type"] == "NEW_WILAYA" for ev_ in ev)
+    finally:
+        WILAYAS.remove("58 - Nouvelle Wilaya")
+        e.site.data.pop("58 - nouvelle wilaya", None)
