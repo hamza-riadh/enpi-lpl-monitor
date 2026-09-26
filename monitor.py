@@ -500,6 +500,8 @@ def reconcile(old, new, failed, counters, program="LPL"):
 
     events = []
     new_counters = {}
+    t_norms = [norm(t) for t in targets()]
+    is_target_w = lambda wk: monitor_all() or any(t in wk for t in t_norms)
 
     for kind, wk, pk, tk in missing:
         key = "|".join(x for x in (kind, wk, pk, tk) if x)
@@ -507,7 +509,8 @@ def reconcile(old, new, failed, counters, program="LPL"):
         ow = old["wilayas"][wk]
         if n >= need:
             if kind == "w":
-                events.append(_event("REMOVED_WILAYA", ow["label"], program=program))
+                if is_target_w(wk):
+                    events.append(_event("REMOVED_WILAYA", ow["label"], program=program))
             elif kind == "p":
                 events.append(_event("REMOVED", ow["label"], ow["projects"][pk]["label"], program=program))
             else:
@@ -524,7 +527,7 @@ def reconcile(old, new, failed, counters, program="LPL"):
 
     for wk, nw in trusted["wilayas"].items():
         ow = old["wilayas"].get(wk)
-        if ow is None:
+        if ow is None and is_target_w(wk):
             events.append(_event("NEW_WILAYA", nw["label"], program=program))
         if nw.get("projects") is None or (ow is not None and ow.get("projects") is None):
             continue

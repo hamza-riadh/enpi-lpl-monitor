@@ -357,17 +357,23 @@ def test_first_scan_partial_failure_rejects_baseline():
 
 
 def test_new_wilaya_appears():
-    """A new wilaya appearing in the dropdown → NEW_WILAYA event."""
+    """A target wilaya appearing in the dropdown triggers NEW_WILAYA, while untargeted wilayas are silent."""
     e = Env()
     e.run(); e.sent.clear()
-    WILAYAS.append("58 - Nouvelle Wilaya")
-    e.site.data["58 - nouvelle wilaya"] = {}
+    WILAYAS.append("16 - Alger Centre")
+    WILAYAS.append("31 - Oran Nouveau")
+    e.site.data["16 - alger centre"] = {}
+    e.site.data["31 - oran nouveau"] = {}
     try:
         ev = e.run()
-        assert any(ev_["type"] == "NEW_WILAYA" for ev_ in ev)
+        wilaya_alerts = [ev_["wilaya"] for ev_ in ev if ev_["type"] == "NEW_WILAYA"]
+        assert "16 - Alger Centre" in wilaya_alerts
+        assert "31 - Oran Nouveau" not in wilaya_alerts
     finally:
-        WILAYAS.remove("58 - Nouvelle Wilaya")
-        e.site.data.pop("58 - nouvelle wilaya", None)
+        WILAYAS.remove("16 - Alger Centre")
+        WILAYAS.remove("31 - Oran Nouveau")
+        e.site.data.pop("16 - alger centre", None)
+        e.site.data.pop("31 - oran nouveau", None)
 
 
 def test_whatsapp_notifier_multi_recipient(monkeypatch):
