@@ -1,11 +1,27 @@
 {
   "consecutive_failures": 0,
   "failure_alerted": false,
-  "last_attempt": "2026-09-26T11:13:25+01:00",
-  "last_success": "2026-09-26T11:13:25+01:00",
-  "missing": {},
+  "failure_alerted_by_program": {
+    "LPL": false,
+    "LPP": false
+  },
+  "failures_by_program": {
+    "LPL": 0,
+    "LPP": 0
+  },
+  "last_attempt": "2026-09-26T14:20:40+01:00",
+  "last_success": "2026-09-26T14:20:40+01:00",
+  "last_success_by_program": {
+    "LPL": "2026-09-26T14:20:40+01:00",
+    "LPP": "2026-09-26T14:20:40+01:00"
+  },
+  "missing": {
+    "LPL": {},
+    "LPP": {}
+  },
   "pending": [],
-  "saved_at": "2026-09-26T11:13:32+01:00",
+  "saved_at": "2026-09-26T14:20:48+01:00",
+  "seen_fb_posts": [],
   "snapshot": {
     "wilayas": {
       "1 - adrar": {
@@ -163,6 +179,213 @@
               "f6": "F6"
             }
           }
+        }
+      }
+    }
+  },
+  "snapshots": {
+    "LPL": {
+      "wilayas": {
+        "1 - adrar": {
+          "id": "1",
+          "label": "1 - ADRAR",
+          "projects": null
+        },
+        "10 - bouira": {
+          "id": "10",
+          "label": "10 - BOUIRA",
+          "projects": null
+        },
+        "12 - tebessa": {
+          "id": "12",
+          "label": "12 - Tebessa",
+          "projects": null
+        },
+        "13 - tlemcen": {
+          "id": "13",
+          "label": "13 - Tlemcen",
+          "projects": null
+        },
+        "14 - tiaret": {
+          "id": "14",
+          "label": "14 - Tiaret",
+          "projects": null
+        },
+        "15 - tizi ouzou": {
+          "id": "15",
+          "label": "15 - Tizi Ouzou",
+          "projects": null
+        },
+        "19 - setif": {
+          "id": "19",
+          "label": "19 - SETIF",
+          "projects": null
+        },
+        "2 - chlef": {
+          "id": "2",
+          "label": "2 - CHLEF",
+          "projects": null
+        },
+        "23 - annaba": {
+          "id": "23",
+          "label": "23 - ANNABA",
+          "projects": null
+        },
+        "25 - constantine": {
+          "id": "25",
+          "label": "25 - CONSTANTINE",
+          "projects": null
+        },
+        "34 - bba": {
+          "id": "34",
+          "label": "34 - BBA",
+          "projects": null
+        },
+        "35 - boumerdes": {
+          "id": "35",
+          "label": "35 - Boumerdes",
+          "projects": {
+            "588 lpl khemis el khechna": {
+              "label": "588 LPL KHEMIS EL KHECHNA",
+              "status": "0",
+              "typologies": {
+                "f3": "F3",
+                "f4": "F4"
+              }
+            },
+            "86 logts lpl khemis el khechna": {
+              "label": "86 LOGTS LPL KHEMIS EL KHECHNA",
+              "status": "0",
+              "typologies": {
+                "f3": "F3",
+                "f4": "F4"
+              }
+            }
+          }
+        },
+        "36 - el taref": {
+          "id": "36",
+          "label": "36 - El Taref",
+          "projects": null
+        },
+        "38 - tissemsilt": {
+          "id": "38",
+          "label": "38 - Tissemsilt",
+          "projects": null
+        },
+        "4 - oum el bouaghi": {
+          "id": "4",
+          "label": "4 - Oum El Bouaghi",
+          "projects": null
+        },
+        "44 - ain defla": {
+          "id": "44",
+          "label": "44 - Ain Defla",
+          "projects": null
+        },
+        "48 - relizane": {
+          "id": "48",
+          "label": "48 - RELIZANE",
+          "projects": null
+        },
+        "5 - batna": {
+          "id": "5",
+          "label": "5 - Batna",
+          "projects": null
+        },
+        "52 - beni abbes": {
+          "id": "52",
+          "label": "52 - Beni abbes",
+          "projects": null
+        },
+        "6 - bejaia": {
+          "id": "6",
+          "label": "6 - Bejaia",
+          "projects": null
+        },
+        "8 - bechar": {
+          "id": "8",
+          "label": "8 - BECHAR",
+          "projects": null
+        },
+        "9 - blida": {
+          "id": "9",
+          "label": "9 - Blida",
+          "projects": {
+            "06 villas ouled yaich": {
+              "label": "06 Villas Ouled Yaich",
+              "status": "0",
+              "typologies": {
+                "f7": "F7"
+              }
+            },
+            "12 villas mouzaia": {
+              "label": "12 Villas Mouzaia",
+              "status": "0",
+              "typologies": {
+                "f5": "F5",
+                "f6": "F6"
+              }
+            },
+            "15 villas larbaa": {
+              "label": "15 VILLAS LARBAA",
+              "status": "0",
+              "typologies": {
+                "f6": "F6"
+              }
+            },
+            "20 villas lpl larbaa": {
+              "label": "20 VILLAS LPL LARBAA",
+              "status": "0",
+              "typologies": {
+                "f6": "F6"
+              }
+            }
+          }
+        }
+      }
+    },
+    "LPP": {
+      "wilayas": {
+        "1 - adrar": {
+          "id": "1",
+          "label": "1 - ADRAR",
+          "projects": null
+        },
+        "49 - timimoune": {
+          "id": "49",
+          "label": "49 - TIMIMOUNE",
+          "projects": null
+        },
+        "50 - bordj badji mokhtar": {
+          "id": "50",
+          "label": "50 - BORDJ BADJI MOKHTAR",
+          "projects": null
+        },
+        "51 - ouled djellal": {
+          "id": "51",
+          "label": "51 - OULED DJELLAL",
+          "projects": null
+        },
+        "53 - ain salah": {
+          "id": "53",
+          "label": "53 - AIN SALAH",
+          "projects": null
+        },
+        "54 - ain guezzam": {
+          "id": "54",
+          "label": "54 - AIN GUEZZAM",
+          "projects": null
+        },
+        "57 - el maghier": {
+          "id": "57",
+          "label": "57 - EL MAGHIER",
+          "projects": null
+        },
+        "58 - el meniaa": {
+          "id": "58",
+          "label": "58 - EL MENIAA",
+          "projects": null
         }
       }
     }
