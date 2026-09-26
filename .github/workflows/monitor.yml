@@ -48,6 +48,10 @@ jobs:
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           # NTFY_SERVER: https://ntfy.sh  # leave blank to use default
 
+          # ── Telegram Bot (multi-recipient chat IDs, store in GitHub Secrets) ──
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_IDS:  ${{ secrets.TELEGRAM_CHAT_IDS }}
+
           # ── WhatsApp CallMeBot (multi-recipient phone:apikey, store in GitHub Secrets) ──
           WHATSAPP_TARGETS: ${{ secrets.WHATSAPP_TARGETS }}
 

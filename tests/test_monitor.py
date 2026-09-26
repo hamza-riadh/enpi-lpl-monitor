@@ -403,3 +403,34 @@ def test_whatsapp_invalid_target_ignored(monkeypatch):
     notifier = m.Notifier()
     assert len(notifier.whatsapp_targets) == 1
     assert notifier.whatsapp_targets[0] == ("+213111222333", "validkey")
+
+
+def test_telegram_notifier_multi_recipient(monkeypatch):
+    """Telegram alerts are dispatched to all configured chat IDs with buttons."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+    monkeypatch.setenv("TELEGRAM_CHAT_IDS", "111222, 333444")
+    monkeypatch.delenv("NTFY_TOPIC", raising=False)
+    monkeypatch.delenv("EMAIL_TO", raising=False)
+    monkeypatch.delenv("WHATSAPP_TARGETS", raising=False)
+
+    notifier = m.Notifier()
+    assert notifier.configured() is True
+    assert len(notifier.telegram_chats) == 2
+    assert notifier.telegram_chats[0] == "111222"
+    assert notifier.telegram_chats[1] == "333444"
+
+    calls = []
+    def fake_handler(req: httpx.Request) -> httpx.Response:
+        data = json.loads(req.content.decode())
+        calls.append(data)
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    notifier._client = httpx.Client(transport=httpx.MockTransport(fake_handler))
+    item = {"title": "🚨 OPPORTUNITE", "body": "Wilaya: Alger", "click": "https://example.com"}
+    assert notifier._telegram(item) is True
+    assert len(calls) == 2
+    assert calls[0]["chat_id"] == "111222"
+    assert calls[1]["chat_id"] == "333444"
+    assert "OPPORTUNITE" in calls[0]["text"]
+    assert calls[0]["parse_mode"] == "HTML"
+    assert "reply_markup" in calls[0]

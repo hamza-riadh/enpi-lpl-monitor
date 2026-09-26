@@ -482,13 +482,23 @@ class Notifier:
                     if phone and key:
                         self.whatsapp_targets.append((phone, key))
 
+        # Telegram Bot configuration (token + comma-separated chat IDs)
+        self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        raw_tg_chats        = os.getenv("TELEGRAM_CHAT_IDS", "").strip()
+        self.telegram_chats = [c.strip() for c in re.split(r"[,\n]+", raw_tg_chats) if c.strip()]
+
         self._client     = httpx.Client(timeout=10, verify=False)
 
     def configured(self):
-        return bool(self.ntfy_topic or (self.email_to and self.smtp_host) or self.whatsapp_targets)
+        return bool(
+            self.ntfy_topic or
+            (self.telegram_token and self.telegram_chats) or
+            (self.email_to and self.smtp_host) or
+            self.whatsapp_targets
+        )
 
     def send(self, item):
-        return any([self._ntfy(item), self._whatsapp(item), self._email(item)])
+        return any([self._telegram(item), self._ntfy(item), self._whatsapp(item), self._email(item)])
 
     def _ntfy(self, item):
         if not self.ntfy_topic:
@@ -512,6 +522,40 @@ class Notifier:
                 log.error("[ALERT] ntfy error: %r", e)
             time.sleep(2 ** attempt)
         return False
+
+    def _telegram(self, item):
+        if not (self.telegram_token and self.telegram_chats):
+            return False
+        title_html = (item.get("title") or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        body_html  = (item.get("body") or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        text = f"<b>{title_html}</b>\n\n{body_html}"
+        payload = {
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False,
+        }
+        if item.get("click"):
+            payload["reply_markup"] = {
+                "inline_keyboard": [[{"text": "🔗 Ouvrir Inscription ENPI", "url": item["click"]}]]
+            }
+
+        url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+        success = False
+        for chat_id in self.telegram_chats:
+            masked = str(chat_id)[:min(4, len(str(chat_id)))] + "***"
+            chat_payload = {**payload, "chat_id": chat_id}
+            for attempt in range(3):
+                try:
+                    r = self._client.post(url, json=chat_payload)
+                    if r.status_code == 200 and r.json().get("ok"):
+                        log.info("[ALERT] Telegram sent OK to chat %s", masked)
+                        success = True
+                        break
+                    log.error("[ALERT] Telegram HTTP %s to %s: %s", r.status_code, masked, r.text[:100])
+                except httpx.HTTPError as e:
+                    log.error("[ALERT] Telegram network error to %s: %r", masked, e)
+                time.sleep(1 + attempt)
+        return success
 
     def _whatsapp(self, item):
         if not self.whatsapp_targets:
@@ -719,6 +763,7 @@ def main(argv=None):
         item = _make_alert_item([ev], INSCRIPTION_URL, now)
         item["title"] = "TEST -- " + item["title"]
         results = {
+            "telegram": notifier._telegram(item),
             "ntfy": notifier._ntfy(item),
             "whatsapp": notifier._whatsapp(item),
             "email": notifier._email(item),
