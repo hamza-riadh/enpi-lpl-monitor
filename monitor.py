@@ -559,6 +559,8 @@ def _empty_state():
         "snapshot": None,
         "missing": {"LPL": {}, "LPP": {}},
         "seen_fb_posts": [],
+        "telegram_subscribers": [],
+        "telegram_last_update_id": 0,
         "consecutive_failures": 0,
         "failures_by_program": {"LPL": 0, "LPP": 0},
         "failure_alerted": False,
@@ -601,6 +603,8 @@ def load_state(path: Path) -> dict:
         if not isinstance(state.get("missing"), dict) or "LPL" not in state["missing"]:
             state["missing"] = {"LPL": state.get("missing", {}) if isinstance(state.get("missing"), dict) else {}, "LPP": {}}
 
+        state.setdefault("telegram_subscribers", [])
+        state.setdefault("telegram_last_update_id", 0)
         state["snapshot"] = state["snapshots"].get("LPL")
         state["consecutive_failures"] = max(state.get("failures_by_program", {}).values()) if state.get("failures_by_program") else 0
         state["failure_alerted"] = any(state.get("failure_alerted_by_program", {}).values()) if state.get("failure_alerted_by_program") else False
@@ -741,6 +745,57 @@ class Notifier:
         self.email_from  = os.getenv("EMAIL_FROM", self.smtp_user)
 
         self._client     = httpx.Client(timeout=10, verify=False)
+
+    def sync_telegram_subscribers(self, state: dict) -> list:
+        if not self.telegram_token:
+            return self.telegram_chats
+
+        state.setdefault("telegram_subscribers", [])
+        known = set(str(c) for c in state["telegram_subscribers"])
+        known.update(self.telegram_chats)
+
+        offset = state.get("telegram_last_update_id", 0)
+        try:
+            url = f"https://api.telegram.org/bot{self.telegram_token}/getUpdates"
+            params = {"timeout": 2}
+            if offset > 0:
+                params["offset"] = offset + 1
+            r = self._client.get(url, params=params)
+            if r.status_code == 200 and r.json().get("ok"):
+                updates = r.json().get("result", [])
+                for u in updates:
+                    uid = u.get("update_id", 0)
+                    if uid > offset:
+                        offset = uid
+                    msg = u.get("message", {})
+                    chat = msg.get("chat", {})
+                    chat_id = str(chat.get("id", ""))
+                    user_first = msg.get("from", {}).get("first_name", "Abonné")
+
+                    if chat_id and chat_id not in known:
+                        known.add(chat_id)
+                        state["telegram_subscribers"].append(chat_id)
+                        log.info("[INFO] New Telegram subscriber auto-detected: %s (%s)", chat_id[:4] + "***", user_first)
+                        try:
+                            welcome = (
+                                f"👋 <b>Bienvenue {user_first} !</b>\n\n"
+                                f"✅ Vous êtes maintenant abonné aux alertes <b>ENPI 24/7</b> pour :\n"
+                                f"• 16 - Alger\n• 42 - Tipaza\n• 09 - Blida\n• 35 - Boumerdes\n\n"
+                                f"Dès qu'un nouveau projet (LPL ou LPP) ouvre, vous recevrez une alerte prioritaire ici instantanément."
+                            )
+                            self._client.post(
+                                f"https://api.telegram.org/bot{self.telegram_token}/sendMessage",
+                                json={"chat_id": chat_id, "text": welcome, "parse_mode": "HTML"}
+                            )
+                        except Exception:
+                            pass
+
+                state["telegram_last_update_id"] = offset
+        except Exception as e:
+            log.warning("[WARNING] Failed to poll Telegram getUpdates: %s", e)
+
+        self.telegram_chats = sorted(list(known))
+        return self.telegram_chats
 
     def configured(self):
         return bool(
@@ -912,6 +967,9 @@ def run_once(state, fetchers, fb_fetcher=None, notifier=None, dry_run=False):
     state.setdefault("last_success_by_program", {"LPL": None, "LPP": None})
     state.setdefault("seen_fb_posts", [])
     state.setdefault("pending", [])
+
+    if notifier and hasattr(notifier, "sync_telegram_subscribers"):
+        notifier.sync_telegram_subscribers(state)
 
     all_events = []
 

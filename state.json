@@ -20,7 +20,7 @@
     "LPP": {}
   },
   "pending": [],
-  "saved_at": "2026-09-26T14:20:48+01:00",
+  "saved_at": "2026-09-26T21:30:53+01:00",
   "seen_fb_posts": [],
   "snapshot": {
     "wilayas": {
@@ -390,5 +390,12 @@
       }
     }
   },
+  "telegram_last_update_id": 333753644,
+  "telegram_subscribers": [
+    "1997851827",
+    "6973643382",
+    "1210000046",
+    "8832976340"
+  ],
   "version": 2
 }
