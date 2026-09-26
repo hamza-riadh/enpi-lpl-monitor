@@ -1,4 +1,4 @@
-name: ENPI LPL 24/7 Monitor
+name: ENPI 24/7 Housing Monitor (LPL + LPP + Facebook)
 
 on:
   schedule:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   scan:
-    name: Scan ENPI LPL
+    name: Scan ENPI (LPL + LPP + Facebook)
     runs-on: ubuntu-latest
     timeout-minutes: 8   # Kill run if it hangs
 
@@ -37,11 +37,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Run test suite
+        run: python -m pytest tests/test_monitor.py -v
+
       - name: Run ENPI monitor
         env:
           # Targets (comma-separated, overrides DEFAULT_TARGETS in code)
           TARGET_WILAYAS: "Alger,Tipaza,Blida,Boumerdes"
           MONITOR_ALL_WILAYAS: "false"
+
+          # ── Facebook RSS feed (optional custom bridge) ──
+          FACEBOOK_RSS_URL: ${{ secrets.FACEBOOK_RSS_URL }}
 
           # ── ntfy push (store in GitHub Secrets) ──
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

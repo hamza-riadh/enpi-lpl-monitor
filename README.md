@@ -1,142 +1,86 @@
-# ENPI LPL Monitor — 24/7 Free Housing Opportunity Alert System
+# ENPI Housing Monitor — 24/7 Free Opportunity Alert System (LPL + LPP + Facebook)
 
-Automatically monitors [ENPI LPL](https://www.enpi-net.dz/LPL/Inscription.php?lang=fr)
-for new housing projects in Algeria. Sends instant phone notifications (ntfy) and
-email alerts when new wilayas, projects, or typologies become selectable.
+Automatically monitors:
+1. **ENPI LPL Portal:** [enpi-net.dz/LPL/Inscription.php](https://www.enpi-net.dz/LPL/Inscription.php?lang=fr)
+2. **ENPI LPP Portal:** [enpi-net.dz/ENPI/Inscription.php](https://www.enpi-net.dz/ENPI/Inscription.php?lang=fr)
+3. **Official ENPI Facebook Page:** [facebook.com/ENPI.dz](https://www.facebook.com/ENPI.dz/)
 
-**Free. No VPS. No paid API. Runs on GitHub Actions ~every 5 minutes.**
+Watches for new projects, quotas, and typologies in **Alger (16), Tipaza (42), Blida (09), and Boumerdes (35)**.
+Sends instant alerts via **Telegram Bot** (with clickable buttons), **ntfy** push, **WhatsApp**, and **Email**.
+
+**100% Free. No VPS. Runs on GitHub Actions ~every 5 minutes.**
 
 ---
 
-## How It Works
+## Architecture & Detection Pipeline
 
 ```
 Every ~5 minutes (GitHub Actions)
   ↓
-GET  https://www.enpi-net.dz/LPL/Inscription.php?lang=fr
-  → extract CSRF token + PHP session cookie
-  → parse wilaya dropdown
+1. Scan LPL Portal:
+   GET  https://www.enpi-net.dz/LPL/Inscription.php?lang=fr
+     → extract CSRF token + PHP session cookie
+     → probe target wilayas: POST /LPL/api/projet-by-wilaya.php
+     → probe project typologies: POST /LPL/api/Typologie-by-projet.php
   ↓
-For each target wilaya:
-  POST /LPL/api/projet-by-wilaya.php {country_id, csrf_token}
-    → get project list
-  POST /LPL/api/Typologie-by-projet.php {state_id, csrf_token}
-    → get typologies (F3, F4, F5...)
+2. Scan LPP Portal:
+   GET  https://www.enpi-net.dz/ENPI/Inscription.php?lang=fr
+     → extract CSRF token + session
+     → probe target wilayas & typologies (F3, F4, F5...)
   ↓
-Compare with trusted previous state (state.json)
+3. Scan Official Facebook Page / Press Releases:
+   Fetch latest ENPI announcements (Facebook RSS / Google News Algeria)
+     → filter for target wilayas (Alger, Tipaza, Blida, Boumerdes, Sidi Abdellah, etc.)
+     → filter for housing keywords (LPL, LPP, souscription, inscription, quota, etc.)
+     → deduplicate against seen posts
   ↓
-Change? → ntfy phone alert + optional email
-No change? → silent exit
+4. Compare with trusted state (state.json):
+     → Detect OPPORTUNITY, NEW_PROJECT, NEW_TYPOLOGY, or NEW_WILAYA
+  ↓
+5. Dispatch instant alerts via Telegram, ntfy, WhatsApp, and Email
 ```
 
-**False-positive protection:**
-- HTTP errors / empty responses → keep previous trusted state, never infer a change
-- Mass disappearance (>50% projects) → wait 6 consecutive scans before believing it
-- Single project removed → wait 2 consecutive scans to confirm
+**False-Positive & Glitch Protection:**
+- HTTP errors / empty responses → retain previous trusted state, never infer a change.
+- Mass disappearance (>50% projects) → wait 6 consecutive scans before confirming.
+- Single project removed → wait 2 consecutive scans before confirming.
+- Auto-recovery notification once connection is restored after a failure.
 
 ---
 
-## Quick Setup (Ubuntu)
+## Multi-Channel Alert Configuration
 
-### 1 — Clone & install
+### 1. Telegram Bot (Recommended — Instant & 100% Free)
+- Create a bot via [@BotFather](https://t.me/BotFather) and get `TELEGRAM_BOT_TOKEN`.
+- Send `/start` to your bot.
+- Get your `chat_id` via `@userinfobot`.
+- Add to GitHub Secrets:
+  - `TELEGRAM_BOT_TOKEN`: `8965800028:AAHK...`
+  - `TELEGRAM_CHAT_IDS`: `8794217005` (or comma-separated for multiple users).
 
-```bash
-git clone https://github.com/YOUR_USERNAME/enpi-lpl-monitor.git
-cd enpi-lpl-monitor
-pip install -r requirements.txt   # needs httpx, beautifulsoup4
-```
+### 2. ntfy Push Notifications
+- Install **ntfy** app on Android or iOS.
+- Subscribe to your private topic.
+- Add `NTFY_TOPIC` to GitHub Secrets.
 
-### 2 — Configure ntfy
+### 3. WhatsApp (CallMeBot)
+- Add `WHATSAPP_TARGETS` formatted as `+213555123456:apikey` in GitHub Secrets.
 
-1. Install the **ntfy** app on your phone (Google Play / App Store / F-Droid)
-2. Subscribe to a **private topic** — use a long random string, e.g.:
-   `enpi_lpl_alerts_7f39b2a64c0e819dff3a`
-3. Keep this topic name **secret** (anyone who knows it can read your alerts)
-
-### 3 — Create `.env` for local testing
-
-```bash
-cp .env.example .env
-# Edit .env and fill in at minimum NTFY_TOPIC
-```
-
-### 4 — Test notifications
-
-```bash
-NTFY_TOPIC=your-secret-topic python monitor.py --test
-# Check your phone — you should receive a test alert instantly
-```
-
-### 5 — Run one live scan
-
-```bash
-python monitor.py
-# First run: creates baseline in state.json (no alerts sent)
-# Second run: compares and alerts on any change
-```
-
-### 6 — Discover live site structure (diagnostic)
-
-```bash
-python monitor.py --discover
-# Prints actual API responses to verify everything works
-```
+### 4. Optional Facebook RSS
+- Set `FACEBOOK_RSS_URL` in GitHub Secrets if using a custom RSS.app / FetchRSS bridge.
 
 ---
 
-## GitHub Actions Setup (24/7 free monitoring)
+## GitHub Secrets Checklist
 
-### Step 1 — Create a PUBLIC GitHub repository
-
-> Public repos get **unlimited** free Actions minutes.  
-> Private repos: 2,000 min/month → exhausted ~day 7 at 5-min intervals.
-
-### Step 2 — Push your code
-
-```bash
-git remote add origin git@github.com:YOUR_USERNAME/enpi-lpl-monitor.git
-git branch -M main
-git add .
-git commit -m "feat: initial ENPI LPL monitor"
-git push -u origin main
-```
-
-### Step 3 — Enable workflow permissions
-
-GitHub → Your Repo → **Settings → Actions → General**  
-Scroll to "Workflow permissions" → select **"Read and write permissions"** → Save
-
-### Step 4 — Add GitHub Secrets
-
-GitHub → Your Repo → **Settings → Secrets and variables → Actions → New repository secret**
-
-| Secret Name    | Example Value                          | Required |
-|----------------|----------------------------------------|----------|
-| `NTFY_TOPIC`   | `enpi_lpl_alerts_7f39b2a64c0e819d`    | ✅ Yes   |
-| `EMAIL_TO`     | `you@gmail.com`                        | Optional |
-| `SMTP_HOST`    | `smtp.gmail.com`                       | Optional |
-| `SMTP_PORT`    | `465`                                  | Optional |
-| `SMTP_USER`    | `your-sender@gmail.com`                | Optional |
-| `SMTP_PASSWORD`| `xxxx xxxx xxxx xxxx` (App Password)   | Optional |
-| `HEALTHCHECK_URL` | `https://hc-ping.com/your-uuid`     | Optional |
-
-### Step 5 — Trigger first run
-
-GitHub → **Actions → ENPI LPL 24/7 Monitor → Run workflow**
-
-After the first run:
-- `state.json` is committed with the baseline snapshot
-- You receive a "Monitor started" ntfy notification
-- All subsequent runs compare against this baseline
-
-### Step 6 — Verify scheduling
-
-The cron `3-58/5 * * * *` runs at minutes :03, :08, :13, ... :58 of every hour.
-GitHub may delay by up to ~10 minutes under load.
-
-> **60-day inactivity rule:** GitHub disables scheduled workflows if no commits
-> are pushed for 60 consecutive days. State updates reset this counter.
-> Use **workflow_dispatch** to manually trigger if needed.
+| Secret Name          | Description                                    | Status   |
+|----------------------|------------------------------------------------|----------|
+| `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather                  | ✅ Recommended |
+| `TELEGRAM_CHAT_IDS`  | Comma-separated Telegram Chat IDs              | ✅ Recommended |
+| `NTFY_TOPIC`         | Private ntfy channel string                    | Optional |
+| `WHATSAPP_TARGETS`   | Multi-recipient `phone:apikey` for CallMeBot    | Optional |
+| `FACEBOOK_RSS_URL`   | Dedicated Facebook page RSS feed               | Optional |
+| `HEALTHCHECK_URL`    | Ping URL (healthchecks.io)                     | Optional |
 
 ---
 

@@ -9,7 +9,8 @@ import httpx, pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitor as m
-m.REQ_DELAY = 0  # zero network delay during unit tests
+m.REQ_DELAY = 0    # zero network delay during unit tests
+m.RETRY_DELAY = 0  # zero backoff delay during unit tests
 
 # ── shared constants ───────────────────────────────────────────────────────
 CSRF = "a" * 64
@@ -434,3 +435,119 @@ def test_telegram_notifier_multi_recipient(monkeypatch):
     assert "OPPORTUNITE" in calls[0]["text"]
     assert calls[0]["parse_mode"] == "HTML"
     assert "reply_markup" in calls[0]
+
+
+def test_multi_engine_lpl_and_lpp():
+    """Both LPL and LPP scan concurrently and report opportunities with their program label."""
+    site_lpl = FakeSite()
+    site_lpp = FakeSite()
+    client_lpl = httpx.Client(transport=httpx.MockTransport(site_lpl.handler))
+    client_lpp = httpx.Client(transport=httpx.MockTransport(site_lpp.handler))
+
+    fetcher_lpl = m.EnpiFetcher("LPL")
+    fetcher_lpl._open_session = lambda: (client_lpl, CSRF)
+    fetcher_lpp = m.EnpiFetcher("LPP")
+    fetcher_lpp._open_session = lambda: (client_lpp, CSRF)
+
+    notifier = FakeNotifier()
+    state = m._empty_state()
+
+    # Run 1: Baselines stored for both
+    ev1 = m.run_once(state, {"LPL": fetcher_lpl, "LPP": fetcher_lpp}, notifier)
+    assert ev1 == []
+    assert state["snapshots"]["LPL"] is not None
+    assert state["snapshots"]["LPP"] is not None
+    notifier.sent.clear()
+
+    # Run 2: LPL adds project in Boumerdes, LPP adds project in Tipaza
+    site_lpl.data["35 - boumerdes"]["Nouveau LPL Boumerdes"] = ["F3", "F4"]
+    site_lpp.data["42 - tipaza"]["Nouveau LPP Tipaza"] = ["F4", "F5"]
+
+    ev2 = m.run_once(state, {"LPL": fetcher_lpl, "LPP": fetcher_lpp}, notifier)
+    assert len(ev2) == 2
+    progs = {e["program"] for e in ev2}
+    assert progs == {"LPL", "LPP"}
+    assert any("LPL" in alert["title"] for alert in notifier.sent)
+    assert any("LPP" in alert["title"] for alert in notifier.sent)
+
+
+def test_resilience_lpl_down_lpp_continues():
+    """If LPL fails, LPP continues scanning and alerting normally."""
+    site_lpl = FakeSite()
+    site_lpp = FakeSite()
+    site_lpl.mode = "down"
+
+    client_lpl = httpx.Client(transport=httpx.MockTransport(site_lpl.handler))
+    client_lpp = httpx.Client(transport=httpx.MockTransport(site_lpp.handler))
+
+    fetcher_lpl = m.EnpiFetcher("LPL")
+    fetcher_lpl._open_session = lambda: (client_lpl, CSRF)
+    fetcher_lpp = m.EnpiFetcher("LPP")
+    fetcher_lpp._open_session = lambda: (client_lpp, CSRF)
+
+    notifier = FakeNotifier()
+    state = m._empty_state()
+
+    # Scan should not crash, LPP gets baseline
+    m.run_once(state, {"LPL": fetcher_lpl, "LPP": fetcher_lpp}, notifier)
+    assert state["snapshots"]["LPL"] is None
+    assert state["snapshots"]["LPP"] is not None
+    assert state["failures_by_program"]["LPL"] == 1
+    assert state["failures_by_program"]["LPP"] == 0
+
+
+def test_facebook_keyword_matching_french_and_arabic():
+    """Facebook post filtering detects target wilayas in French and Arabic with housing keywords."""
+    fb = m.FacebookFetcher()
+    posts = [
+        {"id": "1", "text": "Ouverture des souscriptions pour 120 logements LPL à Boumerdes", "url": "https://fb.com/1"},
+        {"id": "2", "text": "المؤسسة الوطنية للترقية العقارية تعلن عن افتتاح تسجيلات لاقتناء سكنات ترقوي حر بتيبازة", "url": "https://fb.com/2"},
+        {"id": "3", "text": "Disponibilité de quotas LPP à Sidi Abdellah Alger", "url": "https://fb.com/3"},
+        {"id": "4", "text": "Projet de 50 logements à Oran Es-Senia", "url": "https://fb.com/4"},  # Non-target wilaya
+        {"id": "5", "text": "عيد فطر مبارك لكافة المكتتبين والعمال", "url": "https://fb.com/5"},      # No housing/target project
+    ]
+    relevant = fb.filter_relevant(posts, seen_ids=[])
+    assert len(relevant) == 3
+    rel_ids = [p["id"] for p in relevant]
+    assert rel_ids == ["1", "2", "3"]
+
+
+def test_facebook_post_deduplication():
+    """Already seen Facebook posts are ignored on next cycle."""
+    fb = m.FacebookFetcher()
+    posts = [
+        {"id": "post_100", "text": "Projet 80 logts LPL Blida Bouinan", "url": "https://fb.com/100"},
+    ]
+    # First time: relevant
+    r1 = fb.filter_relevant(posts, seen_ids=[])
+    assert len(r1) == 1
+
+    # Second time with post_100 in seen_ids: ignored
+    r2 = fb.filter_relevant(posts, seen_ids=["post_100"])
+    assert len(r2) == 0
+
+
+def test_facebook_rss_parsing():
+    """FacebookFetcher parses RSS XML format correctly."""
+    xml_data = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0">
+      <channel>
+        <title>ENPI Official</title>
+        <item>
+          <title>Nouveau projet Boumerdes</title>
+          <description>Vente de logements LPL disponibles</description>
+          <link>https://facebook.com/ENPI.dz/posts/999</link>
+          <guid>guid_999</guid>
+          <pubDate>Mon, 26 Sep 2026 12:00:00 GMT</pubDate>
+        </item>
+      </channel>
+    </rss>"""
+    fb = m.FacebookFetcher()
+    fb.rss_url = "https://mock-rss.local/feed"
+    fb._client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, text=xml_data)))
+    posts = fb.fetch_posts()
+    assert len(posts) == 1
+    assert posts[0]["id"] == "guid_999"
+    assert "Boumerdes" in posts[0]["text"]
+    assert "https://facebook.com/ENPI.dz/posts/999" in posts[0]["url"]
+
