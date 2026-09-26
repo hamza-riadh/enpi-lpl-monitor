@@ -468,13 +468,27 @@ class Notifier:
         self.smtp_user   = os.getenv("SMTP_USER", "")
         self.smtp_pass   = os.getenv("SMTP_PASSWORD", "")
         self.email_from  = os.getenv("EMAIL_FROM", self.smtp_user)
+
+        # WhatsApp CallMeBot recipients: comma or newline separated list of phone:apikey
+        raw_wa = os.getenv("WHATSAPP_TARGETS", "").strip()
+        self.whatsapp_targets = []
+        if raw_wa:
+            for entry in re.split(r"[,\n]+", raw_wa):
+                entry = entry.strip()
+                if ":" in entry:
+                    phone, key = entry.split(":", 1)
+                    phone = phone.strip().replace(" ", "").replace("-", "")
+                    key = key.strip()
+                    if phone and key:
+                        self.whatsapp_targets.append((phone, key))
+
         self._client     = httpx.Client(timeout=10, verify=False)
 
     def configured(self):
-        return bool(self.ntfy_topic or (self.email_to and self.smtp_host))
+        return bool(self.ntfy_topic or (self.email_to and self.smtp_host) or self.whatsapp_targets)
 
     def send(self, item):
-        return any([self._ntfy(item), self._email(item)])
+        return any([self._ntfy(item), self._whatsapp(item), self._email(item)])
 
     def _ntfy(self, item):
         if not self.ntfy_topic:
@@ -498,6 +512,30 @@ class Notifier:
                 log.error("[ALERT] ntfy error: %r", e)
             time.sleep(2 ** attempt)
         return False
+
+    def _whatsapp(self, item):
+        if not self.whatsapp_targets:
+            return False
+        text = f"*{item['title']}*\n\n{item['body']}"
+        success = False
+        for phone, apikey in self.whatsapp_targets:
+            masked = phone[:min(6, len(phone))] + "***"
+            for attempt in range(3):
+                try:
+                    r = self._client.get(
+                        "https://api.callmebot.com/whatsapp.php",
+                        params={"phone": phone, "text": text, "apikey": apikey},
+                    )
+                    low = r.text.lower()
+                    if r.status_code == 200 and ("error" not in low or "no error" in low):
+                        log.info("[ALERT] WhatsApp sent OK to %s", masked)
+                        success = True
+                        break
+                    log.error("[ALERT] WhatsApp HTTP %s to %s: %s", r.status_code, masked, r.text[:80])
+                except httpx.HTTPError as e:
+                    log.error("[ALERT] WhatsApp network error to %s: %r", masked, e)
+                time.sleep(1 + attempt)
+        return success
 
     def _email(self, item):
         if not (self.email_to and self.smtp_host):
@@ -680,7 +718,11 @@ def main(argv=None):
         ev  = _event("OPPORTUNITY", "Tipaza (TEST)", "TEST PROJET 120 LOGTS", ["F3", "F4"], ["F3", "F4"])
         item = _make_alert_item([ev], INSCRIPTION_URL, now)
         item["title"] = "TEST -- " + item["title"]
-        results = {"ntfy": notifier._ntfy(item), "email": notifier._email(item)}
+        results = {
+            "ntfy": notifier._ntfy(item),
+            "whatsapp": notifier._whatsapp(item),
+            "email": notifier._email(item),
+        }
         print("Notification results:", results)
         return 0 if any(results.values()) else 1
 

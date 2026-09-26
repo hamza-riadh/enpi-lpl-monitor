@@ -48,6 +48,9 @@ jobs:
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           # NTFY_SERVER: https://ntfy.sh  # leave blank to use default
 
+          # ── WhatsApp CallMeBot (multi-recipient phone:apikey, store in GitHub Secrets) ──
+          WHATSAPP_TARGETS: ${{ secrets.WHATSAPP_TARGETS }}
+
           # ── Email backup (optional) ──
           EMAIL_TO:       ${{ secrets.EMAIL_TO }}
           SMTP_HOST:      ${{ secrets.SMTP_HOST }}

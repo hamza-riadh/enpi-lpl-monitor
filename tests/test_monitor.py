@@ -367,3 +367,39 @@ def test_new_wilaya_appears():
     finally:
         WILAYAS.remove("58 - Nouvelle Wilaya")
         e.site.data.pop("58 - nouvelle wilaya", None)
+
+
+def test_whatsapp_notifier_multi_recipient(monkeypatch):
+    """WhatsApp alerts are dispatched to all configured recipients."""
+    monkeypatch.setenv("WHATSAPP_TARGETS", "+213555123456:key1, +213770987654:key2")
+    monkeypatch.delenv("NTFY_TOPIC", raising=False)
+    monkeypatch.delenv("EMAIL_TO", raising=False)
+
+    notifier = m.Notifier()
+    assert notifier.configured() is True
+    assert len(notifier.whatsapp_targets) == 2
+    assert notifier.whatsapp_targets[0] == ("+213555123456", "key1")
+    assert notifier.whatsapp_targets[1] == ("+213770987654", "key2")
+
+    calls = []
+    def fake_handler(req: httpx.Request) -> httpx.Response:
+        calls.append(dict(req.url.params))
+        return httpx.Response(200, text="Message queued")
+
+    notifier._client = httpx.Client(transport=httpx.MockTransport(fake_handler))
+    item = {"title": "🚨 OPPORTUNITE", "body": "Wilaya: Alger\nProjet: X"}
+    assert notifier._whatsapp(item) is True
+    assert len(calls) == 2
+    assert calls[0]["phone"] == "+213555123456"
+    assert calls[0]["apikey"] == "key1"
+    assert calls[1]["phone"] == "+213770987654"
+    assert calls[1]["apikey"] == "key2"
+    assert "OPPORTUNITE" in calls[0]["text"]
+
+
+def test_whatsapp_invalid_target_ignored(monkeypatch):
+    """Malformed targets without colon are safely ignored."""
+    monkeypatch.setenv("WHATSAPP_TARGETS", "bad_entry, +213111222333:validkey, :missingphone")
+    notifier = m.Notifier()
+    assert len(notifier.whatsapp_targets) == 1
+    assert notifier.whatsapp_targets[0] == ("+213111222333", "validkey")
