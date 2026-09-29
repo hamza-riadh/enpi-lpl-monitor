@@ -36,7 +36,7 @@ import sys
 import time
 import unicodedata
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -75,7 +75,7 @@ PROGRAMS = {
 # ─────────────────────────────────────────────────────────────────
 # FACEBOOK CONFIGURATION & KEYWORDS
 # ─────────────────────────────────────────────────────────────────
-FACEBOOK_PAGE_URL = "https://www.facebook.com/ENPI.dz/"
+FACEBOOK_PAGE_URL = "https://www.facebook.com/profile.php?id=100064556897450"
 TARGET_WILAYA_KEYWORDS = [
     "alger", "tipaza", "blida", "boumerdes", "boumerdès",
     "الجزائر", "تيبازة", "البليدة", "بومرداس",
@@ -359,71 +359,8 @@ class FacebookFetcher:
                             })
                     if posts:
                         log.info("[INFO] Fetched %d posts from Facebook RSS feed", len(posts))
-                        return posts
             except Exception as e:
                 log.warning("[WARNING] Facebook RSS fetch failed: %s", e)
-
-        # Priority 2: Google News Algeria search for ENPI / LPL / LPP official housing announcements
-        # Use targeted Arabic and French queries to avoid global esports noise ("League of Legends LPL")
-        try:
-            news_queries = [
-                "https://news.google.com/rss/search?q=%22المؤسسة+الوطنية+للترقية+العقارية%22&hl=ar&gl=DZ&ceid=DZ:ar",
-                "https://news.google.com/rss/search?q=ENPI+Algérie+logement&hl=fr&gl=DZ&ceid=DZ:fr",
-                "https://news.google.com/rss/search?q=%22ENPI%22+(LPL+OR+LPP)+Algerie&hl=fr&gl=DZ&ceid=DZ:fr"
-            ]
-            noise_markers = ["esports", "league of legends", "lpl 202", "weibo gaming", "team-aaa", "sheep esports", "lpl financial"]
-            for q_url in news_queries:
-                r = self._client.get(q_url)
-                if r.status_code == 200:
-                    import xml.etree.ElementTree as ET
-                    try:
-                        root = ET.fromstring(r.content)
-                        for item in root.findall(".//item")[:20]:
-                            title = (item.findtext("title") or "").strip()
-                            desc = (item.findtext("description") or "").strip()
-                            combined_text = f"{title}\n{desc}".strip()
-                            low = norm(combined_text)
-                            if any(marker in low for marker in noise_markers):
-                                continue
-                            link = (item.findtext("link") or "").strip() or FACEBOOK_PAGE_URL
-                            pub = (item.findtext("pubDate") or "").strip()
-                            posts.append({
-                                "id": f"gn_{abs(hash(title))}",
-                                "text": combined_text,
-                                "url": link,
-                                "date": pub
-                            })
-                    except Exception:
-                        pass
-            if posts:
-                log.info("[INFO] Fetched %d targeted ENPI announcement items from news feed", len(posts))
-        except Exception as e:
-            log.warning("[WARNING] Google News ENPI search mirror failed: %s", e)
-
-        # Priority 3: Fallback search query snippet extraction
-        if not posts:
-            try:
-                r = self._client.post(
-                    "https://html.duckduckgo.com/html/",
-                    data={"q": "site:facebook.com/ENPI.dz/"}
-                )
-                if r.status_code == 200:
-                    soup = BeautifulSoup(r.text, "html.parser")
-                    for res in soup.find_all("div", class_="result"):
-                        snip = res.find("a", class_="result__snippet")
-                        link = res.find("a", class_="result__url")
-                        if snip:
-                            text = snip.get_text().strip()
-                            url = link.get("href", "").strip() if link else FACEBOOK_PAGE_URL
-                            if text:
-                                posts.append({
-                                    "id": norm(text[:70]),
-                                    "text": text,
-                                    "url": url if "facebook.com" in url else FACEBOOK_PAGE_URL,
-                                    "date": ""
-                                })
-            except Exception as e:
-                log.warning("[WARNING] Facebook search mirror query failed: %s", e)
 
         return posts
 
@@ -434,6 +371,18 @@ class FacebookFetcher:
             pid = post.get("id") or norm(post.get("text", "")[:80])
             if pid in seen_set:
                 continue
+
+            # Strict recency guard: discard any publication older than 72 hours
+            pub_date = post.get("date")
+            if pub_date:
+                try:
+                    import email.utils
+                    p_dt = email.utils.parsedate_to_datetime(pub_date)
+                    if p_dt and (datetime.now(timezone.utc) - p_dt.astimezone(timezone.utc)).total_seconds() > 3 * 86400:
+                        continue
+                except Exception:
+                    pass
+
             low_text = norm(post.get("text", ""))
             matched_wilayas = [w for w in TARGET_WILAYA_KEYWORDS if w in low_text]
             has_housing = any(k in low_text for k in HOUSING_KEYWORDS)

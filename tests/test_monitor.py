@@ -623,4 +623,25 @@ def test_esports_noise_filtering():
     assert "Blida" in relevant[0]["text"]
 
 
+def test_outdated_news_items_filtered_out():
+    """Posts from 2024 or older than 72 hours are strictly rejected."""
+    fb = m.FacebookFetcher()
+    posts = [
+        {
+            "id": "old_2024",
+            "text": "Logement LPL Blida : ouverture des inscriptions villas",
+            "date": "Mon, 26 Feb 2024 13:11:19 GMT"
+        },
+        {
+            "id": "recent_2026",
+            "text": "Logement LPL Blida : ouverture des inscriptions villas Mouzaia",
+            "date": "Tue, 29 Sep 2026 12:00:00 GMT"
+        }
+    ]
+    relevant = fb.filter_relevant(posts, [])
+    assert len(relevant) == 1
+    assert relevant[0]["id"] == "recent_2026"
+
+
+
 
