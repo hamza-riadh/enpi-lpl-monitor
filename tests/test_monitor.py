@@ -597,17 +597,23 @@ def test_status_change_detection():
     assert "Statut: 0 -> 10" in events[0]["new_typologies"]
 
 
-def test_telegram_strict_single_user_restriction():
-    """When TELEGRAM_CHAT_IDS is specified, it strictly restricts recipients and ignores other users."""
+def test_telegram_multi_account_broadcast():
+    """All registered subscriber accounts receive future alerts."""
     notifier = m.Notifier()
     notifier.telegram_token = "123456:FAKE_TOKEN"
     notifier.telegram_chats = ["8794217005"]
 
-    state = {"telegram_subscribers": ["999999", "888888"], "telegram_last_update_id": 0}
+    state = {
+        "telegram_subscribers": ["8794217005", "1997851827", "6973643382", "1210000046", "8832976340"],
+        "telegram_last_update_id": 0
+    }
     active_chats = notifier.sync_telegram_subscribers(state)
 
-    assert active_chats == ["8794217005"]
-    assert state["telegram_subscribers"] == ["8794217005"]
+    assert len(active_chats) == 5
+    assert "8794217005" in active_chats
+    assert "1997851827" in active_chats
+    assert "8832976340" in active_chats
+
 
 
 def test_esports_noise_filtering():

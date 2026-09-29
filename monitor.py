@@ -750,14 +750,14 @@ class Notifier:
         if not self.telegram_token:
             return self.telegram_chats
 
-        # If explicit chat IDs are configured via environment, respect them strictly
-        # and do not broadcast to any other accounts.
-        if self.telegram_chats:
-            state["telegram_subscribers"] = list(self.telegram_chats)
-            return self.telegram_chats
-
         state.setdefault("telegram_subscribers", [])
         known = set(str(c) for c in state["telegram_subscribers"])
+
+        # Merge configured chat IDs into state subscribers
+        for cid in self.telegram_chats:
+            if cid and cid not in known:
+                known.add(cid)
+                state["telegram_subscribers"].append(cid)
 
         offset = state.get("telegram_last_update_id", 0)
         try:
@@ -775,31 +775,17 @@ class Notifier:
                     msg = u.get("message", {})
                     chat = msg.get("chat", {})
                     chat_id = str(chat.get("id", ""))
-                    user_first = msg.get("from", {}).get("first_name", "Abonné")
 
                     if chat_id and chat_id not in known:
                         known.add(chat_id)
                         state["telegram_subscribers"].append(chat_id)
-                        log.info("[INFO] New Telegram subscriber auto-detected: %s (%s)", chat_id[:4] + "***", user_first)
-                        try:
-                            welcome = (
-                                f"👋 <b>Bienvenue {user_first} !</b>\n\n"
-                                f"✅ Vous êtes maintenant abonné aux alertes <b>ENPI 24/7</b> pour :\n"
-                                f"• 16 - Alger\n• 42 - Tipaza\n• 09 - Blida\n• 35 - Boumerdes\n\n"
-                                f"Dès qu'un nouveau projet (LPL ou LPP) ouvre, vous recevrez une alerte prioritaire ici instantanément."
-                            )
-                            self._client.post(
-                                f"https://api.telegram.org/bot{self.telegram_token}/sendMessage",
-                                json={"chat_id": chat_id, "text": welcome, "parse_mode": "HTML"}
-                            )
-                        except Exception:
-                            pass
+                        log.info("[INFO] Telegram subscriber registered: %s", chat_id[:4] + "***")
 
                 state["telegram_last_update_id"] = offset
         except Exception as e:
             log.warning("[WARNING] Failed to poll Telegram getUpdates: %s", e)
 
-        self.telegram_chats = sorted(list(known))
+        self.telegram_chats = list(state["telegram_subscribers"])
         return self.telegram_chats
 
     def configured(self):
