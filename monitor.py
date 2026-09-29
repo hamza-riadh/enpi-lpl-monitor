@@ -763,9 +763,14 @@ class Notifier:
         if not self.telegram_token:
             return self.telegram_chats
 
+        # If explicit chat IDs are configured via environment, respect them strictly
+        # and do not broadcast to any other accounts.
+        if self.telegram_chats:
+            state["telegram_subscribers"] = list(self.telegram_chats)
+            return self.telegram_chats
+
         state.setdefault("telegram_subscribers", [])
         known = set(str(c) for c in state["telegram_subscribers"])
-        known.update(self.telegram_chats)
 
         offset = state.get("telegram_last_update_id", 0)
         try:
