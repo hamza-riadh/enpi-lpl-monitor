@@ -126,6 +126,17 @@ def monitor_all() -> bool:
     return os.getenv("MONITOR_ALL_WILAYAS", "false").lower() in ("1", "true", "yes")
 
 
+DEFAULT_TARGET_TYPOLOGIES = ["F3", "F4", "F5"]
+
+
+def target_typologies() -> set[str]:
+    env = os.getenv("TARGET_TYPOLOGIES")
+    if env:
+        return {x.strip().upper() for x in env.split(",") if x.strip()}
+    return set(DEFAULT_TARGET_TYPOLOGIES)
+
+
+
 class ExtractionError(Exception):
     pass
 
@@ -616,6 +627,14 @@ REMOVAL_NOTES = {
 def _make_alert_item(events, official_url, now):
     events = sorted(events, key=lambda e: -EVENT_META[e["type"]][1])
     prog = events[0].get("program", "LPL")
+    target_types = target_typologies()
+
+    has_target_apt = any(
+        any(t.upper() in target_types for t in ev.get("typologies", [])) or
+        any(t.upper() in target_types for t in ev.get("new_typologies", []))
+        for ev in events
+    )
+
     blocks = []
     for ev in events:
         p_name = ev.get("program", prog)
@@ -630,21 +649,40 @@ def _make_alert_item(events, official_url, now):
             lines.append(f"Typologie: {', '.join(ev['typologies'])}")
         if ev["new_typologies"] and ev["type"] == "NEW_TYPOLOGY":
             lines.append(f"Nouvelles: {', '.join(ev['new_typologies'])}")
+
+        ev_has_apt = any(t.upper() in target_types for t in ev.get("typologies", []))
+        if ev_has_apt:
+            matched = [t for t in ev.get("typologies", []) if t.upper() in target_types]
+            lines.append(f"🎯 APPARTEMENT CIBLE : {', '.join(matched)} disponible !")
+            lines.append("⚡ Action recommandée : Ouvrez immédiatement le portail pour souscrire !")
+        elif any(v in (ev.get("project") or "").lower() for v in ("villa", "villas")):
+            lines.append("ℹ️ Catégorie : Villa / Hors critères appartements F3/F4/F5")
+
         note = REMOVAL_NOTES.get(ev["type"])
         if ev["type"] == "OPPORTUNITY":
             note = f"Selectionnable sur le formulaire officiel {p_name}. Verifiez le site pour confirmer."
         if note:
             lines.append(f"Note: {note}")
         blocks.append("\n".join(lines))
+
     body = "\n\n".join(blocks)
     body += (f"\n\nDetecte: {now.strftime('%d %B %Y — %H:%M')} (Alger)\n"
              f"Source: Portail inscription ENPI {prog}\nLien: {official_url}")
+
     top = events[0]["type"]
-    title_str = EVENT_META[top][0].replace("ENPI", f"ENPI {prog}")
+    if has_target_apt:
+        title_str = f"🏢🚨 ENPI {prog} — OPPORTUNITE APPARTEMENT (F3/F4/F5) !"
+        tags = ["rotating_light", "apartment", "star"]
+        priority = 5
+    else:
+        title_str = EVENT_META[top][0].replace("ENPI", f"ENPI {prog}")
+        tags = EVENT_META[top][2]
+        priority = EVENT_META[top][1]
+
     if len(events) > 1:
         title_str += f" (+{len(events) - 1})"
-    return {"title": title_str, "body": body, "priority": EVENT_META[top][1],
-            "tags": EVENT_META[top][2], "click": official_url}
+    return {"title": title_str, "body": body, "priority": priority,
+            "tags": tags, "click": official_url}
 
 
 def _facebook_alert_item(post, now):

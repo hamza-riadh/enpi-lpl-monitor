@@ -643,5 +643,43 @@ def test_outdated_news_items_filtered_out():
     assert relevant[0]["id"] == "recent_2026"
 
 
+def test_apartment_target_detection_highlights_f3_f4_f5():
+    """Projects with F3, F4, or F5 typologies receive prominent apartment highlights and priority 5."""
+    events = [{
+        "type": "OPPORTUNITY",
+        "program": "LPL",
+        "wilaya": "16 - Alger",
+        "project": "200 Logements Sidi Abdellah",
+        "typologies": ["F3", "F4"],
+        "new_typologies": ["F3", "F4"]
+    }]
+    now = m.datetime(2026, 9, 29, 21, 0, tzinfo=m.TZ)
+    alert = m._make_alert_item(events, "https://www.enpi-net.dz/LPL/", now)
+
+    assert "APPARTEMENT" in alert["title"]
+    assert alert["priority"] == 5
+    assert "APPARTEMENT CIBLE" in alert["body"]
+    assert "F3, F4" in alert["body"]
+
+
+def test_villa_detected_displays_villa_category():
+    """Projects exclusively with villas are noted with villa category."""
+    events = [{
+        "type": "OPPORTUNITY",
+        "program": "LPL",
+        "wilaya": "9 - Blida",
+        "project": "15 VILLAS LARBAA",
+        "typologies": ["F6"],
+        "new_typologies": ["F6"]
+    }]
+    now = m.datetime(2026, 9, 29, 21, 0, tzinfo=m.TZ)
+    alert = m._make_alert_item(events, "https://www.enpi-net.dz/LPL/", now)
+
+    assert alert["title"].startswith("🚨🚨 ENPI")
+    assert "Villa" in alert["body"]
+
+
+
+
 
 
