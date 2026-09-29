@@ -597,3 +597,30 @@ def test_status_change_detection():
     assert "Statut: 0 -> 10" in events[0]["new_typologies"]
 
 
+def test_telegram_strict_single_user_restriction():
+    """When TELEGRAM_CHAT_IDS is specified, it strictly restricts recipients and ignores other users."""
+    notifier = m.Notifier()
+    notifier.telegram_token = "123456:FAKE_TOKEN"
+    notifier.telegram_chats = ["8794217005"]
+
+    state = {"telegram_subscribers": ["999999", "888888"], "telegram_last_update_id": 0}
+    active_chats = notifier.sync_telegram_subscribers(state)
+
+    assert active_chats == ["8794217005"]
+    assert state["telegram_subscribers"] == ["8794217005"]
+
+
+def test_esports_noise_filtering():
+    """Esports news items with 'League of Legends' or 'esports' are completely filtered out."""
+    fb = m.FacebookFetcher()
+    noise_posts = [
+        {"id": "1", "text": "LPL saison 2026 : finales régionales League of Legends Weibo Gaming"},
+        {"id": "2", "text": "Edward Gaming vs Bilibili Gaming LPL 2026 esports match"},
+        {"id": "3", "text": "Logement LPL Blida : ouverture des inscriptions pour les villas Mouzaia"}
+    ]
+    relevant = fb.filter_relevant(noise_posts, [])
+    assert len(relevant) == 1
+    assert "Blida" in relevant[0]["text"]
+
+
+
