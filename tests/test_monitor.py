@@ -557,3 +557,43 @@ def test_facebook_rss_parsing():
     assert "Boumerdes" in posts[0]["text"]
     assert "https://facebook.com/ENPI.dz/posts/999" in posts[0]["url"]
 
+
+def test_status_change_detection():
+    """Project status changes trigger a STATUS_CHANGE alert."""
+    old_snap = {
+        "wilayas": {
+            "9 - blida": {
+                "id": "9",
+                "label": "9 - Blida",
+                "projects": {
+                    "12 villas mouzaia": {
+                        "label": "12 Villas Mouzaia",
+                        "status": "0",
+                        "typologies": {"f5": "F5"}
+                    }
+                }
+            }
+        }
+    }
+    new_snap = {
+        "wilayas": {
+            "9 - blida": {
+                "id": "9",
+                "label": "9 - Blida",
+                "projects": {
+                    "12 villas mouzaia": {
+                        "label": "12 Villas Mouzaia",
+                        "status": "10",
+                        "typologies": {"f5": "F5"}
+                    }
+                }
+            }
+        }
+    }
+    trusted, events, counters, baseline = m.reconcile(old_snap, new_snap, set(), {}, "LPL")
+    assert len(events) == 1
+    assert events[0]["type"] == "STATUS_CHANGE"
+    assert events[0]["project"] == "12 Villas Mouzaia"
+    assert "Statut: 0 -> 10" in events[0]["new_typologies"]
+
+

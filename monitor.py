@@ -364,29 +364,39 @@ class FacebookFetcher:
                 log.warning("[WARNING] Facebook RSS fetch failed: %s", e)
 
         # Priority 2: Google News Algeria search for ENPI / LPL / LPP official housing announcements
+        # Use targeted Arabic and French queries to avoid global esports noise ("League of Legends LPL")
         try:
-            q = 'ENPI OR LPL OR LPP OR "Entreprise Nationale de Promotion Immobilière"'
-            url = f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}&hl=fr&gl=DZ&ceid=DZ:fr"
-            r = self._client.get(url)
-            if r.status_code == 200:
-                import xml.etree.ElementTree as ET
-                try:
-                    root = ET.fromstring(r.content)
-                    for item in root.findall(".//item")[:20]:
-                        title = (item.findtext("title") or "").strip()
-                        desc = (item.findtext("description") or "").strip()
-                        link = (item.findtext("link") or "").strip() or FACEBOOK_PAGE_URL
-                        pub = (item.findtext("pubDate") or "").strip()
-                        posts.append({
-                            "id": f"gn_{abs(hash(title))}",
-                            "text": f"{title}\n{desc}".strip(),
-                            "url": link,
-                            "date": pub
-                        })
-                except Exception:
-                    pass
-                if posts:
-                    log.info("[INFO] Fetched %d recent ENPI announcement items from news feed", len(posts))
+            news_queries = [
+                "https://news.google.com/rss/search?q=%22المؤسسة+الوطنية+للترقية+العقارية%22&hl=ar&gl=DZ&ceid=DZ:ar",
+                "https://news.google.com/rss/search?q=ENPI+Algérie+logement&hl=fr&gl=DZ&ceid=DZ:fr",
+                "https://news.google.com/rss/search?q=%22ENPI%22+(LPL+OR+LPP)+Algerie&hl=fr&gl=DZ&ceid=DZ:fr"
+            ]
+            noise_markers = ["esports", "league of legends", "lpl 202", "weibo gaming", "team-aaa", "sheep esports", "lpl financial"]
+            for q_url in news_queries:
+                r = self._client.get(q_url)
+                if r.status_code == 200:
+                    import xml.etree.ElementTree as ET
+                    try:
+                        root = ET.fromstring(r.content)
+                        for item in root.findall(".//item")[:20]:
+                            title = (item.findtext("title") or "").strip()
+                            desc = (item.findtext("description") or "").strip()
+                            combined_text = f"{title}\n{desc}".strip()
+                            low = norm(combined_text)
+                            if any(marker in low for marker in noise_markers):
+                                continue
+                            link = (item.findtext("link") or "").strip() or FACEBOOK_PAGE_URL
+                            pub = (item.findtext("pubDate") or "").strip()
+                            posts.append({
+                                "id": f"gn_{abs(hash(title))}",
+                                "text": combined_text,
+                                "url": link,
+                                "date": pub
+                            })
+                    except Exception:
+                        pass
+            if posts:
+                log.info("[INFO] Fetched %d targeted ENPI announcement items from news feed", len(posts))
         except Exception as e:
             log.warning("[WARNING] Google News ENPI search mirror failed: %s", e)
 
@@ -542,6 +552,8 @@ def reconcile(old, new, failed, counters, program="LPL"):
             elif added:
                 kind = "OPPORTUNITY" if not op["typologies"] else "NEW_TYPOLOGY"
                 events.append(_event(kind, nw["label"], np_["label"], all_t, added, program=program))
+            elif op.get("status") is not None and np_.get("status") is not None and op.get("status") != np_.get("status"):
+                events.append(_event("STATUS_CHANGE", nw["label"], np_["label"], all_t, [f"Statut: {op.get('status')} -> {np_.get('status')}"], program=program))
 
     return trusted, events, new_counters, False
 
@@ -639,6 +651,7 @@ EVENT_META = {
     "NEW_PROJECT":       ("🚨 ENPI — NOUVEAU PROJET",                  4, ["rotating_light"]),
     "NEW_TYPOLOGY":      ("🚨 ENPI — NOUVELLE TYPOLOGIE",              4, ["rotating_light"]),
     "NEW_WILAYA":        ("🚨 ENPI — NOUVELLE WILAYA",                 4, ["rotating_light"]),
+    "STATUS_CHANGE":     ("⚡ ENPI — STATUT MODIFIE",                  4, ["bell"]),
     "REMOVED":           ("⚠️ ENPI — PROJET NON DETECTE",              2, ["warning"]),
     "REMOVED_TYPOLOGY":  ("⚠️ ENPI — TYPOLOGIE NON DETECTEE",         2, ["warning"]),
     "REMOVED_WILAYA":    ("⚠️ ENPI — WILAYA NON DETECTEE",            2, ["warning"]),
@@ -1050,6 +1063,12 @@ def run_once(state, fetchers, fb_fetcher=None, notifier=None, dry_run=False):
             relevant = fb_fetcher.filter_relevant(fb_posts, state.get("seen_fb_posts", []))
             if relevant:
                 log.info("[ALERT] Found %d relevant new Facebook post(s)!", len(relevant))
+                # If a large batch of historic news items appears, mark all as seen and alert on top 3 most recent
+                if len(relevant) > 3:
+                    for post in relevant[3:]:
+                        state.setdefault("seen_fb_posts", []).append(post["id"])
+                    relevant = relevant[:3]
+
                 for post in relevant:
                     state.setdefault("seen_fb_posts", []).append(post["id"])
                     state["pending"].append(_facebook_alert_item(post, now))
