@@ -541,17 +541,37 @@ def test_status_change_detection():
     assert "Statut: 0 -> 10" in events[0]["new_typologies"]
 
 
-def test_telegram_single_recipient_hamza():
-    """Telegram notifications are locked strictly to Hamza Riadh (8794217005)."""
+def test_telegram_multi_account_broadcast():
+    """All 5 registered subscriber accounts receive future alerts."""
     notifier = m.Notifier()
+    notifier.telegram_token = "123456:FAKE_TOKEN"
     state = {
         "telegram_subscribers": ["8794217005", "1997851827", "6973643382", "1210000046", "8832976340"],
         "telegram_last_update_id": 0
     }
     active_chats = notifier.sync_telegram_subscribers(state)
 
-    assert active_chats == ["8794217005"]
-    assert state["telegram_subscribers"] == ["8794217005"]
+    assert len(active_chats) == 5
+    assert set(active_chats) == {"8794217005", "1997851827", "6973643382", "1210000046", "8832976340"}
+    assert notifier.telegram_chats == active_chats
+
+
+def test_telegram_dynamic_subscriber_registration():
+    """Users who send /start to the bot are dynamically registered to subscribers."""
+    notifier = m.Notifier()
+    notifier.telegram_token = "123456:FAKE_TOKEN"
+    fake_updates = {
+        "ok": True,
+        "result": [
+            {"update_id": 10, "message": {"chat": {"id": 999999999}, "text": "/start"}}
+        ]
+    }
+    notifier._client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=fake_updates)))
+    state = {"telegram_subscribers": ["8794217005"], "telegram_last_update_id": 0}
+    active = notifier.sync_telegram_subscribers(state)
+    assert "999999999" in active
+    assert state["telegram_last_update_id"] == 10
+
 
 
 def test_is_apartment_opportunity_accepts_f3_f4_f5_f6():

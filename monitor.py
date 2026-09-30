@@ -635,12 +635,10 @@ class Notifier:
         self.ntfy_server = os.getenv("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
         self.ntfy_token  = os.getenv("NTFY_TOKEN", "")
 
-        # Telegram Bot configuration: Single-recipient strictly locked to Hamza Riadh
+        # Telegram Bot configuration: Multi-recipient broadcasting
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        raw_tg_chats        = os.getenv("TELEGRAM_CHAT_IDS", "8794217005").strip()
+        raw_tg_chats        = os.getenv("TELEGRAM_CHAT_IDS", "").strip()
         self.telegram_chats = [c.strip() for c in re.split(r"[,\n]+", raw_tg_chats) if c.strip()]
-        if not self.telegram_chats:
-            self.telegram_chats = ["8794217005"]
 
         # WhatsApp CallMeBot recipients: comma or newline separated list of phone:apikey
         raw_wa = os.getenv("WHATSAPP_TARGETS", "").strip()
@@ -667,10 +665,46 @@ class Notifier:
         self._client     = httpx.Client(timeout=10, verify=False)
 
     def sync_telegram_subscribers(self, state: dict) -> list:
-        # Strictly restricted to Hamza Riadh (8794217005) for testing
-        primary = "8794217005"
-        state["telegram_subscribers"] = [primary]
-        self.telegram_chats = [primary]
+        if not self.telegram_token:
+            return self.telegram_chats
+
+        state.setdefault("telegram_subscribers", [])
+        known = set(str(c) for c in state["telegram_subscribers"])
+
+        # Merge configured chat IDs into state subscribers
+        for cid in self.telegram_chats:
+            if cid and cid not in known:
+                known.add(cid)
+                state["telegram_subscribers"].append(cid)
+
+        # Dynamic discovery via Telegram /start polling
+        offset = state.get("telegram_last_update_id", 0)
+        try:
+            url = f"https://api.telegram.org/bot{self.telegram_token}/getUpdates"
+            params = {"timeout": 2}
+            if offset > 0:
+                params["offset"] = offset + 1
+            r = self._client.get(url, params=params)
+            if r.status_code == 200 and r.json().get("ok"):
+                updates = r.json().get("result", [])
+                for u in updates:
+                    uid = u.get("update_id", 0)
+                    if uid > offset:
+                        offset = uid
+                    msg = u.get("message", {})
+                    chat = msg.get("chat", {})
+                    chat_id = str(chat.get("id", ""))
+
+                    if chat_id and chat_id not in known:
+                        known.add(chat_id)
+                        state["telegram_subscribers"].append(chat_id)
+                        log.info("[INFO] Telegram subscriber registered: %s", chat_id[:4] + "***")
+
+                state["telegram_last_update_id"] = offset
+        except Exception as e:
+            log.warning("[WARNING] Failed to poll Telegram getUpdates: %s", e)
+
+        self.telegram_chats = list(state["telegram_subscribers"]) or list(self.telegram_chats)
         return self.telegram_chats
 
     def configured(self):

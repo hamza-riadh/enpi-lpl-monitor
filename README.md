@@ -51,8 +51,8 @@ Every ~5 minutes (GitHub Actions / cron-job.org)
 - Send `/start` to your bot.
 - Get your `chat_id` via `@userinfobot`.
 - Add to GitHub Secrets:
-  - `TELEGRAM_BOT_TOKEN`: `8965800028:AAHK...`
-  - `TELEGRAM_CHAT_IDS`: `8794217005`
+  - `TELEGRAM_BOT_TOKEN`: `1234567890:ABCDefGhIJKlmNoPQRsTUVwxyZ`
+  - `TELEGRAM_CHAT_IDS`: `123456789` (or comma-separated for multiple accounts)
 
 ### 2. ntfy Push Notifications
 - Install **ntfy** app on Android or iOS.
@@ -69,7 +69,7 @@ Every ~5 minutes (GitHub Actions / cron-job.org)
 | Secret Name          | Description                                    | Status   |
 |----------------------|------------------------------------------------|----------|
 | `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather                  | ✅ Recommended |
-| `TELEGRAM_CHAT_IDS`  | Telegram Chat ID (Hamza Riadh: 8794217005)      | ✅ Recommended |
+| `TELEGRAM_CHAT_IDS`  | Comma-separated Telegram Chat IDs              | ✅ Recommended |
 | `NTFY_TOPIC`         | Private ntfy channel string                    | Optional |
 | `WHATSAPP_TARGETS`   | Multi-recipient `phone:apikey` for CallMeBot    | Optional |
 | `HEALTHCHECK_URL`    | Ping URL (healthchecks.io)                     | Optional |
