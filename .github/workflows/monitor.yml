@@ -1,4 +1,4 @@
-name: ENPI 24/7 Housing Monitor (LPL + LPP + Facebook)
+name: ENPI 24/7 Housing Monitor (LPL + LPP Portals)
 
 on:
   schedule:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   scan:
-    name: Scan ENPI (LPL + LPP + Facebook)
+    name: Scan ENPI Portals (LPL + LPP)
     runs-on: ubuntu-latest
     timeout-minutes: 8   # Kill run if it hangs
 
@@ -46,8 +46,9 @@ jobs:
           TARGET_WILAYAS: "Alger,Tipaza,Blida,Boumerdes"
           MONITOR_ALL_WILAYAS: "false"
 
-          # ── Facebook RSS feed (optional custom bridge) ──
-          FACEBOOK_RSS_URL: ${{ secrets.FACEBOOK_RSS_URL }}
+          # ── Strict Apartment Filter (F3, F4, F5, F6) — Villas rejected ──
+          APARTMENTS_ONLY: "true"
+          TARGET_TYPOLOGIES: "F3,F4,F5,F6"
 
           # ── ntfy push (store in GitHub Secrets) ──
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

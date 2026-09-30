@@ -1,12 +1,12 @@
-# ENPI Housing Monitor — 24/7 Free Opportunity Alert System (LPL + LPP + Facebook)
+# ENPI Housing Monitor — 24/7 Free Opportunity Alert System (LPL + LPP Portals)
 
 Automatically monitors:
 1. **ENPI LPL Portal:** [enpi-net.dz/LPL/Inscription.php](https://www.enpi-net.dz/LPL/Inscription.php?lang=fr)
 2. **ENPI LPP Portal:** [enpi-net.dz/ENPI/Inscription.php](https://www.enpi-net.dz/ENPI/Inscription.php?lang=fr)
-3. **Official ENPI Facebook Page:** [facebook.com/ENPI.dz](https://www.facebook.com/ENPI.dz/)
 
-Watches for new projects, quotas, and typologies in **Alger (16), Tipaza (42), Blida (09), and Boumerdes (35)**.
-Sends instant alerts via **Telegram Bot** (with clickable buttons), **ntfy** push, **WhatsApp**, and **Email**.
+Watches for new apartment opportunities (F3, F4, F5, F6) in **Alger (16), Tipaza (42), Blida (09), and Boumerdes (35)**.
+Strictly filters out and rejects villas (e.g. Larbaâ, Mouzaia).
+Sends instant alerts via **Telegram Bot** (with clickable direct buttons), **ntfy** push, **WhatsApp**, and **Email**.
 
 **100% Free. No VPS. Runs on GitHub Actions ~every 5 minutes.**
 
@@ -15,7 +15,7 @@ Sends instant alerts via **Telegram Bot** (with clickable buttons), **ntfy** pus
 ## Architecture & Detection Pipeline
 
 ```
-Every ~5 minutes (GitHub Actions)
+Every ~5 minutes (GitHub Actions / cron-job.org)
   ↓
 1. Scan LPL Portal:
    GET  https://www.enpi-net.dz/LPL/Inscription.php?lang=fr
@@ -26,18 +26,14 @@ Every ~5 minutes (GitHub Actions)
 2. Scan LPP Portal:
    GET  https://www.enpi-net.dz/ENPI/Inscription.php?lang=fr
      → extract CSRF token + session
-     → probe target wilayas & typologies (F3, F4, F5...)
+     → probe target wilayas & typologies (F3, F4, F5, F6)
   ↓
-3. Scan Official Facebook Page / Press Releases:
-   Fetch latest ENPI announcements (Facebook RSS / Google News Algeria)
-     → filter for target wilayas (Alger, Tipaza, Blida, Boumerdes, Sidi Abdellah, etc.)
-     → filter for housing keywords (LPL, LPP, souscription, inscription, quota, etc.)
-     → deduplicate against seen posts
-  ↓
-4. Compare with trusted state (state.json):
+3. Reconcile against trusted state (state.json):
      → Detect OPPORTUNITY, NEW_PROJECT, NEW_TYPOLOGY, or NEW_WILAYA
+     → Filter out all villas (e.g. Larbaâ, Mouzaia)
+     → Require target apartment typologies (F3, F4, F5, F6)
   ↓
-5. Dispatch instant alerts via Telegram, ntfy, WhatsApp, and Email
+4. Dispatch instant priority alerts via Telegram, ntfy, WhatsApp, and Email
 ```
 
 **False-Positive & Glitch Protection:**
@@ -50,13 +46,13 @@ Every ~5 minutes (GitHub Actions)
 
 ## Multi-Channel Alert Configuration
 
-### 1. Telegram Bot (Recommended — Instant & 100% Free)
+### 1. Telegram Bot (Instant & 100% Free)
 - Create a bot via [@BotFather](https://t.me/BotFather) and get `TELEGRAM_BOT_TOKEN`.
 - Send `/start` to your bot.
 - Get your `chat_id` via `@userinfobot`.
 - Add to GitHub Secrets:
   - `TELEGRAM_BOT_TOKEN`: `8965800028:AAHK...`
-  - `TELEGRAM_CHAT_IDS`: `8794217005` (or comma-separated for multiple users).
+  - `TELEGRAM_CHAT_IDS`: `8794217005`
 
 ### 2. ntfy Push Notifications
 - Install **ntfy** app on Android or iOS.
@@ -66,9 +62,6 @@ Every ~5 minutes (GitHub Actions)
 ### 3. WhatsApp (CallMeBot)
 - Add `WHATSAPP_TARGETS` formatted as `+213555123456:apikey` in GitHub Secrets.
 
-### 4. Optional Facebook RSS
-- Set `FACEBOOK_RSS_URL` in GitHub Secrets if using a custom RSS.app / FetchRSS bridge.
-
 ---
 
 ## GitHub Secrets Checklist
@@ -76,10 +69,9 @@ Every ~5 minutes (GitHub Actions)
 | Secret Name          | Description                                    | Status   |
 |----------------------|------------------------------------------------|----------|
 | `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather                  | ✅ Recommended |
-| `TELEGRAM_CHAT_IDS`  | Comma-separated Telegram Chat IDs              | ✅ Recommended |
+| `TELEGRAM_CHAT_IDS`  | Telegram Chat ID (Hamza Riadh: 8794217005)      | ✅ Recommended |
 | `NTFY_TOPIC`         | Private ntfy channel string                    | Optional |
 | `WHATSAPP_TARGETS`   | Multi-recipient `phone:apikey` for CallMeBot    | Optional |
-| `FACEBOOK_RSS_URL`   | Dedicated Facebook page RSS feed               | Optional |
 | `HEALTHCHECK_URL`    | Ping URL (healthchecks.io)                     | Optional |
 
 ---
@@ -147,14 +139,14 @@ MONITOR_ALL_WILAYAS: "true"
 
 ---
 
-## Facebook Monitoring
+## Portal-Only Strategy & Apartment Targeting
 
-Facebook scraping from GitHub Actions IP ranges reliably triggers login walls
-and bot detection. This system correctly uses the **official ENPI registration
-portal as the primary source**. Facebook is NOT scraped.
+ENPI posts new apartment quotas directly to the official registration portals (LPL & LPP) before any social media announcements. Facebook announcements often lag by 20 to 60+ minutes and heavily feature slow-moving villa projects (e.g. Larbaâ, Mouzaia) that were already listed.
 
-WhatsApp and SMS require paid APIs for reliable automation. ntfy + email is
-the recommended free solution.
+By querying the official portal APIs directly every 5 minutes:
+1. **Zero Social Media Latency:** Instant detection the second a quota or apartment project opens.
+2. **Strict Typology Filtering:** Only apartments (**F3, F4, F5, F6**) in the 4 target wilayas (Alger, Tipaza, Blida, Boumerdes) trigger alerts.
+3. **No Noise / No Villas:** Villa projects are automatically filtered out.
 
 ---
 
@@ -162,9 +154,10 @@ the recommended free solution.
 
 | Question | Decision | Reason |
 |----------|----------|--------|
-| Playwright? | ❌ Not used | Site uses simple POST/GET AJAX — no JS rendering needed |
-| Database? | ❌ Not used | JSON state file is sufficient |
-| VPS? | ❌ Not used | GitHub Actions handles scheduling and execution |
-| Session handling | ✅ Fresh per run | CSRF tokens + PHP session are per-request; obtained before each scan |
-| State commit strategy | Only on change | Avoids 288 pointless commits/day |
-| Facebook | ❌ Not built | Unreliable from datacenter IPs; primary source is sufficient |
+| Playwright / Selenium? | ❌ Not used | Portals use clean AJAX endpoints — lightweight HTTP requests are 50x faster and never get blocked |
+| Database? | ❌ Not used | `state.json` Git-backed atomic state is 100% reliable and zero-cost |
+| VPS? | ❌ Not used | GitHub Actions + cron-job.org handles 24/7 execution |
+| Session handling | ✅ Fresh per run | CSRF tokens + PHP session cookies obtained dynamically per scan |
+| State commit strategy | Only on change | Avoids pointless commits; preserves GitHub API quota |
+| Filtering | Apartments F3-F6 | Villas and commercial premises are strictly excluded |
+

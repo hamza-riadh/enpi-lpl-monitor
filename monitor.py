@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 """
-ENPI 24/7 Housing Opportunity Monitor (LPL + LPP + Facebook)
-============================================================
+ENPI 24/7 Housing Opportunity Monitor (LPL + LPP Official Portals)
+==================================================================
 Monitors:
   1. ENPI LPL Portal: https://www.enpi-net.dz/LPL/Inscription.php?lang=fr
   2. ENPI LPP Portal: https://www.enpi-net.dz/ENPI/Inscription.php?lang=fr
-  3. Official ENPI Facebook: https://www.facebook.com/ENPI.dz/
 
 Target Wilayas Monitored by Default:
   Alger (16), Tipaza (42), Blida (09), Boumerdes (35)
 
+Target Housing Typologies:
+  Apartments Only: F3, F4, F5, F6 (Villas strictly excluded)
+
 Dispatches instant alerts via:
-  - Telegram Bot (Official, instant, multi-recipient)
+  - Telegram Bot (Official, instant, single-recipient mode)
   - ntfy Push (Instant mobile push with alarm)
   - WhatsApp CallMeBot (Multi-recipient)
   - Email (SMTP backup)
 
 Usage:
-  python monitor.py              # Full scan cycle (LPL + LPP + Facebook)
-  python monitor.py --test       # Send simulated OPPORTUNITY alert to all channels
+  python monitor.py              # Full scan cycle (LPL + LPP)
+  python monitor.py --test       # Send simulated APARTMENT alert
   python monitor.py --dry-run    # Scan + print events; nothing saved/sent
   python monitor.py --discover   # Probe live LPL & LPP structures
 """
@@ -73,22 +75,10 @@ PROGRAMS = {
 }
 
 # ─────────────────────────────────────────────────────────────────
-# FACEBOOK CONFIGURATION & KEYWORDS
+# TARGET CONFIGURATIONS (WILAYAS & APARTMENT TYPOLOGIES)
 # ─────────────────────────────────────────────────────────────────
-FACEBOOK_PAGE_URL = "https://www.facebook.com/profile.php?id=100064556897450"
-TARGET_WILAYA_KEYWORDS = [
-    "alger", "tipaza", "blida", "boumerdes", "boumerdès",
-    "الجزائر", "تيبازة", "البليدة", "بومرداس",
-    "khemis", "larbaa", "ouled yaich", "mouzaia", "bouinan", "sidi abdellah", "zeralda",
-    "زرالدة", "بوينان", "سيدي عبد الله", "خميس الخشنة", "الأربعاء"
-]
-HOUSING_KEYWORDS = [
-    "lpl", "lpp", "logement", "logts", "projet", "souscription", "inscription",
-    "ouverture", "vente", "quota", "tranche",
-    "سكن", "سكنات", "مشروع", "افتتاح", "تسجيل", "مكتتب", "مكتتبين", "اقتناء", "ترقوي", "حصة"
-]
-
 DEFAULT_TARGETS = ["Alger", "Tipaza", "Blida", "Boumerdes"]
+DEFAULT_TARGET_TYPOLOGIES = ["F3", "F4", "F5", "F6"]
 
 REMOVAL_CONFIRMATIONS = 2
 MASS_REMOVAL_RATIO    = 0.5
@@ -126,14 +116,43 @@ def monitor_all() -> bool:
     return os.getenv("MONITOR_ALL_WILAYAS", "false").lower() in ("1", "true", "yes")
 
 
-DEFAULT_TARGET_TYPOLOGIES = ["F3", "F4", "F5"]
-
-
 def target_typologies() -> set[str]:
     env = os.getenv("TARGET_TYPOLOGIES")
     if env:
         return {x.strip().upper() for x in env.split(",") if x.strip()}
     return set(DEFAULT_TARGET_TYPOLOGIES)
+
+
+def apartments_only() -> bool:
+    return os.getenv("APARTMENTS_ONLY", "true").lower() in ("1", "true", "yes")
+
+
+def is_apartment_opportunity(ev: dict) -> bool:
+    """
+    Returns True if an event represents an apartment opportunity (F3, F4, F5, F6)
+    and is NOT a villa.
+    """
+    if not apartments_only():
+        return True
+
+    proj_name = norm(ev.get("project") or "")
+    # Check if project name explicitly indicates a villa (French or Arabic)
+    villa_keywords = ("villa", "villas", "فيلا", "فيلات", "فيلل")
+    if any(v in proj_name for v in villa_keywords):
+        return False
+
+    typos = [t.upper() for t in (ev.get("typologies") or [])]
+    new_typos = [t.upper() for t in (ev.get("new_typologies") or [])]
+    target_types = target_typologies()
+
+    # If typologies are known, at least one must match target apartment types (F3, F4, F5, F6)
+    all_typos = typos or new_typos
+    if all_typos:
+        return any(t in target_types for t in all_typos)
+
+    # If typologies are not yet loaded for a new non-villa project or wilaya, treat as apartment opportunity
+    return True
+
 
 
 
@@ -321,92 +340,6 @@ class EnpiFetcher:
 
 
 # ─────────────────────────────────────────────────────────────────
-# FACEBOOK FETCHER (PAGE MONITOR)
-# ─────────────────────────────────────────────────────────────────
-class FacebookFetcher:
-    def __init__(self):
-        self.rss_url = os.getenv("FACEBOOK_RSS_URL", "").strip()
-        self._client = httpx.Client(timeout=15, follow_redirects=True, headers={
-            "User-Agent": UA,
-            "Accept-Language": "fr-FR,fr;q=0.9,ar;q=0.8,en;q=0.7"
-        })
-
-    def fetch_posts(self) -> list:
-        posts = []
-        # Priority 1: User-configured RSS feed (e.g. from RSS.app, FetchRSS, or custom bridge)
-        if self.rss_url:
-            try:
-                r = self._client.get(self.rss_url)
-                if r.status_code == 200:
-                    import xml.etree.ElementTree as ET
-                    try:
-                        root = ET.fromstring(r.content)
-                        for item in root.findall(".//item"):
-                            title = (item.findtext("title") or "").strip()
-                            desc = (item.findtext("description") or "").strip()
-                            link = (item.findtext("link") or "").strip() or FACEBOOK_PAGE_URL
-                            guid = (item.findtext("guid") or "").strip() or link
-                            pub = (item.findtext("pubDate") or "").strip()
-                            posts.append({
-                                "id": guid or link,
-                                "text": f"{title}\n{desc}".strip(),
-                                "url": link,
-                                "date": pub
-                            })
-                    except Exception:
-                        soup = BeautifulSoup(r.text, "html.parser")
-                        for item in soup.find_all("item"):
-                            title = item.find("title").get_text().strip() if item.find("title") else ""
-                            desc = item.find("description").get_text().strip() if item.find("description") else ""
-                            link_m = re.search(r"<link>(.*?)</link>", str(item), re.I)
-                            link = link_m.group(1).strip() if link_m else FACEBOOK_PAGE_URL
-                            guid = item.find("guid").get_text().strip() if item.find("guid") else link
-                            pub = item.find("pubdate").get_text().strip() if item.find("pubdate") else ""
-                            posts.append({
-                                "id": guid or link,
-                                "text": f"{title}\n{desc}".strip(),
-                                "url": link,
-                                "date": pub
-                            })
-                    if posts:
-                        log.info("[INFO] Fetched %d posts from Facebook RSS feed", len(posts))
-            except Exception as e:
-                log.warning("[WARNING] Facebook RSS fetch failed: %s", e)
-
-        return posts
-
-    def filter_relevant(self, posts: list, seen_ids: list) -> list:
-        relevant = []
-        seen_set = set(seen_ids or [])
-        for post in posts:
-            pid = post.get("id") or norm(post.get("text", "")[:80])
-            if pid in seen_set:
-                continue
-
-            # Strict recency guard: discard any publication older than 72 hours
-            pub_date = post.get("date")
-            if pub_date:
-                try:
-                    import email.utils
-                    p_dt = email.utils.parsedate_to_datetime(pub_date)
-                    if p_dt and (datetime.now(timezone.utc) - p_dt.astimezone(timezone.utc)).total_seconds() > 3 * 86400:
-                        continue
-                except Exception:
-                    pass
-
-            low_text = norm(post.get("text", ""))
-            matched_wilayas = [w for w in TARGET_WILAYA_KEYWORDS if w in low_text]
-            has_housing = any(k in low_text for k in HOUSING_KEYWORDS)
-            if matched_wilayas and has_housing:
-                relevant.append({
-                    **post,
-                    "id": pid,
-                    "wilaya_match": ", ".join(matched_wilayas).title()
-                })
-        return relevant
-
-
-# ─────────────────────────────────────────────────────────────────
 # RECONCILIATION & DIFF ENGINE
 # ─────────────────────────────────────────────────────────────────
 def _event(kind, wilaya, project=None, typologies=None, new_typologies=None, program="LPL"):
@@ -519,7 +452,7 @@ def reconcile(old, new, failed, counters, program="LPL"):
 
 
 # ─────────────────────────────────────────────────────────────────
-# STATE PERSISTENCE (LPL + LPP + FACEBOOK)
+# STATE PERSISTENCE (LPL + LPP)
 # ─────────────────────────────────────────────────────────────────
 EPHEMERAL_KEYS = ("last_success", "last_attempt", "saved_at", "last_success_by_program")
 
@@ -629,9 +562,12 @@ def _make_alert_item(events, official_url, now):
     prog = events[0].get("program", "LPL")
     target_types = target_typologies()
 
+    villa_keywords = ("villa", "villas", "فيلا", "فيلات", "فيلل")
     has_target_apt = any(
-        any(t.upper() in target_types for t in ev.get("typologies", [])) or
-        any(t.upper() in target_types for t in ev.get("new_typologies", []))
+        not any(v in norm(ev.get("project") or "") for v in villa_keywords) and (
+            any(t.upper() in target_types for t in ev.get("typologies", [])) or
+            any(t.upper() in target_types for t in ev.get("new_typologies", []))
+        )
         for ev in events
     )
 
@@ -650,13 +586,14 @@ def _make_alert_item(events, official_url, now):
         if ev["new_typologies"] and ev["type"] == "NEW_TYPOLOGY":
             lines.append(f"Nouvelles: {', '.join(ev['new_typologies'])}")
 
-        ev_has_apt = any(t.upper() in target_types for t in ev.get("typologies", []))
+        ev_is_villa = any(v in norm(ev.get("project") or "") for v in villa_keywords)
+        ev_has_apt = not ev_is_villa and any(t.upper() in target_types for t in ev.get("typologies", []))
         if ev_has_apt:
             matched = [t for t in ev.get("typologies", []) if t.upper() in target_types]
             lines.append(f"🎯 APPARTEMENT CIBLE : {', '.join(matched)} disponible !")
             lines.append("⚡ Action recommandée : Ouvrez immédiatement le portail pour souscrire !")
-        elif any(v in (ev.get("project") or "").lower() for v in ("villa", "villas")):
-            lines.append("ℹ️ Catégorie : Villa / Hors critères appartements F3/F4/F5")
+        elif ev_is_villa:
+            lines.append("ℹ️ Catégorie : Villa / Hors critères appartements F3/F4/F5/F6")
 
         note = REMOVAL_NOTES.get(ev["type"])
         if ev["type"] == "OPPORTUNITY":
@@ -671,8 +608,8 @@ def _make_alert_item(events, official_url, now):
 
     top = events[0]["type"]
     if has_target_apt:
-        title_str = f"🏢🚨 ENPI {prog} — OPPORTUNITE APPARTEMENT (F3/F4/F5) !"
-        tags = ["rotating_light", "apartment", "star"]
+        title_str = f"🏢🚨 ENPI {prog} — OPPORTUNITE APPARTEMENT ({', '.join(sorted(target_types))}) !"
+        tags = ["rotating_light", "apartment", "building_construction"]
         priority = 5
     else:
         title_str = EVENT_META[top][0].replace("ENPI", f"ENPI {prog}")
@@ -683,25 +620,6 @@ def _make_alert_item(events, official_url, now):
         title_str += f" (+{len(events) - 1})"
     return {"title": title_str, "body": body, "priority": priority,
             "tags": tags, "click": official_url}
-
-
-def _facebook_alert_item(post, now):
-    w_match = post.get("wilaya_match", "Alger / Tipaza / Blida / Boumerdes")
-    title = f"📢 ENPI FACEBOOK — ANNONCE DETECTEE ({w_match})"
-    body = (
-        f"Publication Facebook detectee:\n\n"
-        f"{post['text'][:350]}...\n\n"
-        f"Detecte: {now.strftime('%d %B %Y — %H:%M')} (Alger)\n"
-        f"Page: {FACEBOOK_PAGE_URL}\n"
-        f"Lien: {post['url']}"
-    )
-    return {
-        "title": title,
-        "body": body,
-        "priority": 4,
-        "tags": ["loudspeaker", "information_source"],
-        "click": post["url"]
-    }
 
 
 def _simple_item(title, body, priority=3, tags=("warning",), click=""):
@@ -717,10 +635,12 @@ class Notifier:
         self.ntfy_server = os.getenv("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
         self.ntfy_token  = os.getenv("NTFY_TOKEN", "")
 
-        # Telegram Bot configuration (token + comma-separated chat IDs)
+        # Telegram Bot configuration: Single-recipient strictly locked to Hamza Riadh
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        raw_tg_chats        = os.getenv("TELEGRAM_CHAT_IDS", "").strip()
+        raw_tg_chats        = os.getenv("TELEGRAM_CHAT_IDS", "8794217005").strip()
         self.telegram_chats = [c.strip() for c in re.split(r"[,\n]+", raw_tg_chats) if c.strip()]
+        if not self.telegram_chats:
+            self.telegram_chats = ["8794217005"]
 
         # WhatsApp CallMeBot recipients: comma or newline separated list of phone:apikey
         raw_wa = os.getenv("WHATSAPP_TARGETS", "").strip()
@@ -747,45 +667,10 @@ class Notifier:
         self._client     = httpx.Client(timeout=10, verify=False)
 
     def sync_telegram_subscribers(self, state: dict) -> list:
-        if not self.telegram_token:
-            return self.telegram_chats
-
-        state.setdefault("telegram_subscribers", [])
-        known = set(str(c) for c in state["telegram_subscribers"])
-
-        # Merge configured chat IDs into state subscribers
-        for cid in self.telegram_chats:
-            if cid and cid not in known:
-                known.add(cid)
-                state["telegram_subscribers"].append(cid)
-
-        offset = state.get("telegram_last_update_id", 0)
-        try:
-            url = f"https://api.telegram.org/bot{self.telegram_token}/getUpdates"
-            params = {"timeout": 2}
-            if offset > 0:
-                params["offset"] = offset + 1
-            r = self._client.get(url, params=params)
-            if r.status_code == 200 and r.json().get("ok"):
-                updates = r.json().get("result", [])
-                for u in updates:
-                    uid = u.get("update_id", 0)
-                    if uid > offset:
-                        offset = uid
-                    msg = u.get("message", {})
-                    chat = msg.get("chat", {})
-                    chat_id = str(chat.get("id", ""))
-
-                    if chat_id and chat_id not in known:
-                        known.add(chat_id)
-                        state["telegram_subscribers"].append(chat_id)
-                        log.info("[INFO] Telegram subscriber registered: %s", chat_id[:4] + "***")
-
-                state["telegram_last_update_id"] = offset
-        except Exception as e:
-            log.warning("[WARNING] Failed to poll Telegram getUpdates: %s", e)
-
-        self.telegram_chats = list(state["telegram_subscribers"])
+        # Strictly restricted to Hamza Riadh (8794217005) for testing
+        primary = "8794217005"
+        state["telegram_subscribers"] = [primary]
+        self.telegram_chats = [primary]
         return self.telegram_chats
 
     def configured(self):
@@ -816,7 +701,7 @@ class Notifier:
             "disable_web_page_preview": False,
         }
         if item.get("click"):
-            label = "🔗 Ouvrir Inscription ENPI" if "enpi-net.dz" in item["click"] else "🔗 Ouvrir le Post Facebook"
+            label = "🔗 Ouvrir Inscription ENPI"
             payload["reply_markup"] = {
                 "inline_keyboard": [[{"text": label, "url": item["click"]}]]
             }
@@ -849,7 +734,7 @@ class Notifier:
                    "priority": item["priority"], "tags": item["tags"]}
         if item.get("click"):
             payload["click"] = item["click"]
-            label = "Ouvrir ENPI" if "enpi-net.dz" in item["click"] else "Ouvrir Facebook"
+            label = "Ouvrir Inscription ENPI"
             payload["actions"] = [{"action": "view", "label": label, "url": item["click"]}]
         for attempt in range(3):
             try:
@@ -933,22 +818,17 @@ def flush_pending(state, notifier):
 
 
 # ─────────────────────────────────────────────────────────────────
-# MULTI-ENGINE EXECUTION (LPL + LPP + FACEBOOK)
+# PORTALS EXECUTION ENGINE (LPL + LPP)
 # ─────────────────────────────────────────────────────────────────
-def run_once(state, fetchers, fb_fetcher=None, notifier=None, dry_run=False):
-    # Support flexible signature: run_once(state, fetchers, notifier) OR run_once(state, fetchers, fb_fetcher, notifier)
-    if isinstance(fb_fetcher, Notifier) or (fb_fetcher is not None and not isinstance(fb_fetcher, FacebookFetcher) and hasattr(fb_fetcher, "send")):
-        dry_run = notifier if isinstance(notifier, bool) else False
-        notifier = fb_fetcher
-        fb_fetcher = None
-
+def run_once(state, fetchers, notifier=None, dry_run=False):
+    # Support flexible signature: run_once(state, fetchers, notifier, dry_run)
     if not isinstance(fetchers, dict):
         prog = getattr(fetchers, "program", "LPL")
         fetchers = {prog: fetchers}
 
     now = datetime.now(TZ)
     state["last_attempt"] = now.isoformat(timespec="seconds")
-    log.info("[INFO] === ENPI Multi-Monitor started (LPL + LPP + Facebook) | Targets: %s ===",
+    log.info("[INFO] === ENPI Portal Monitor started (LPL + LPP) | Targets: %s ===",
              "ALL" if monitor_all() else ", ".join(targets()))
 
     state.setdefault("snapshots", {"LPL": None, "LPP": None})
@@ -956,7 +836,6 @@ def run_once(state, fetchers, fb_fetcher=None, notifier=None, dry_run=False):
     state.setdefault("failures_by_program", {"LPL": 0, "LPP": 0})
     state.setdefault("failure_alerted_by_program", {"LPL": False, "LPP": False})
     state.setdefault("last_success_by_program", {"LPL": None, "LPP": None})
-    state.setdefault("seen_fb_posts", [])
     state.setdefault("pending", [])
 
     if notifier and hasattr(notifier, "sync_telegram_subscribers"):
@@ -1006,14 +885,18 @@ def run_once(state, fetchers, fb_fetcher=None, notifier=None, dry_run=False):
                 log.info("[INFO] [%s] Baseline stored — no alerts sent", prog_name)
                 state["pending"].append(_simple_item(
                     f"ENPI {prog_name} Monitor demarre",
-                    f"Reference {prog_name}: {len(trusted['wilayas'])} wilayas detectees.\nVous serez alerte des nouvelles opportunites.",
+                    f"Reference {prog_name}: {len(trusted['wilayas'])} wilayas detectees.\nVous serez alerte des nouveaux appartements F3/F4/F5/F6.",
                     2, ["white_check_mark"], cfg["inscription_url"]
                 ))
             elif events:
                 for ev in events:
                     log.info("[ALERT] [%s] %s | Wilaya: %s | Projet: %s | Typologies: %s",
                              prog_name, ev["type"], ev["wilaya"], ev["project"], ev["typologies"])
-                state["pending"].append(_make_alert_item(events, cfg["inscription_url"], now))
+                apt_events = [ev for ev in events if is_apartment_opportunity(ev)]
+                if apt_events:
+                    state["pending"].append(_make_alert_item(apt_events, cfg["inscription_url"], now))
+                else:
+                    log.info("[INFO] [%s] %d event(s) filtered out (villas or non-apartment typologies)", prog_name, len(events))
                 all_events.extend(events)
             else:
                 log.info("[INFO] [%s] No changes detected", prog_name)
@@ -1033,31 +916,7 @@ def run_once(state, fetchers, fb_fetcher=None, notifier=None, dry_run=False):
     state["consecutive_failures"] = max(state["failures_by_program"].values()) if state.get("failures_by_program") else 0
     state["failure_alerted"] = any(state["failure_alerted_by_program"].values()) if state.get("failure_alerted_by_program") else False
 
-    # 2. Scan Official Facebook Page
-    if fb_fetcher:
-        try:
-            log.info("[INFO] Checking ENPI Facebook page for new announcements...")
-            fb_posts = fb_fetcher.fetch_posts()
-            relevant = fb_fetcher.filter_relevant(fb_posts, state.get("seen_fb_posts", []))
-            if relevant:
-                log.info("[ALERT] Found %d relevant new Facebook post(s)!", len(relevant))
-                # If a large batch of historic news items appears, mark all as seen and alert on top 3 most recent
-                if len(relevant) > 3:
-                    for post in relevant[3:]:
-                        state.setdefault("seen_fb_posts", []).append(post["id"])
-                    relevant = relevant[:3]
-
-                for post in relevant:
-                    state.setdefault("seen_fb_posts", []).append(post["id"])
-                    state["pending"].append(_facebook_alert_item(post, now))
-                    all_events.append({"type": "FACEBOOK_POST", "post": post})
-            else:
-                log.info("[INFO] Facebook check OK — no new target announcements")
-            state["seen_fb_posts"] = state.get("seen_fb_posts", [])[-200:]
-        except Exception as e:
-            log.warning("[WARNING] Facebook check skipped: %s", e)
-
-    log.info("[INFO] Multi-Monitor cycle finished")
+    log.info("[INFO] Portal scan cycle finished")
 
     if dry_run:
         log.info("[INFO] dry-run: nothing sent or saved")
@@ -1136,7 +995,7 @@ def main(argv=None):
 
     if a.test:
         now = datetime.now(TZ)
-        ev  = _event("OPPORTUNITY", "Boumerdes (TEST)", "TEST 150 LOGTS BOUMERDES VILLE", ["F3", "F4"], ["F3", "F4"], program="LPL")
+        ev  = _event("OPPORTUNITY", "16 - Alger (TEST)", "TEST 150 LOGTS SIDI ABDELLAH", ["F3", "F4", "F5", "F6"], ["F3", "F4", "F5", "F6"], program="LPL")
         item = _make_alert_item([ev], PROGRAMS["LPL"]["inscription_url"], now)
         item["title"] = "TEST -- " + item["title"]
         results = {
@@ -1154,8 +1013,7 @@ def main(argv=None):
         "LPL": EnpiFetcher("LPL"),
         "LPP": EnpiFetcher("LPP"),
     }
-    fb_fetcher = FacebookFetcher()
-    run_once(state, fetchers, fb_fetcher, notifier, dry_run=a.dry_run)
+    run_once(state, fetchers, notifier, dry_run=a.dry_run)
 
     if not a.dry_run:
         written = save_state(state_path, state)

@@ -502,62 +502,6 @@ def test_resilience_lpl_down_lpp_continues():
     assert state["failures_by_program"]["LPP"] == 0
 
 
-def test_facebook_keyword_matching_french_and_arabic():
-    """Facebook post filtering detects target wilayas in French and Arabic with housing keywords."""
-    fb = m.FacebookFetcher()
-    posts = [
-        {"id": "1", "text": "Ouverture des souscriptions pour 120 logements LPL à Boumerdes", "url": "https://fb.com/1"},
-        {"id": "2", "text": "المؤسسة الوطنية للترقية العقارية تعلن عن افتتاح تسجيلات لاقتناء سكنات ترقوي حر بتيبازة", "url": "https://fb.com/2"},
-        {"id": "3", "text": "Disponibilité de quotas LPP à Sidi Abdellah Alger", "url": "https://fb.com/3"},
-        {"id": "4", "text": "Projet de 50 logements à Oran Es-Senia", "url": "https://fb.com/4"},  # Non-target wilaya
-        {"id": "5", "text": "عيد فطر مبارك لكافة المكتتبين والعمال", "url": "https://fb.com/5"},      # No housing/target project
-    ]
-    relevant = fb.filter_relevant(posts, seen_ids=[])
-    assert len(relevant) == 3
-    rel_ids = [p["id"] for p in relevant]
-    assert rel_ids == ["1", "2", "3"]
-
-
-def test_facebook_post_deduplication():
-    """Already seen Facebook posts are ignored on next cycle."""
-    fb = m.FacebookFetcher()
-    posts = [
-        {"id": "post_100", "text": "Projet 80 logts LPL Blida Bouinan", "url": "https://fb.com/100"},
-    ]
-    # First time: relevant
-    r1 = fb.filter_relevant(posts, seen_ids=[])
-    assert len(r1) == 1
-
-    # Second time with post_100 in seen_ids: ignored
-    r2 = fb.filter_relevant(posts, seen_ids=["post_100"])
-    assert len(r2) == 0
-
-
-def test_facebook_rss_parsing():
-    """FacebookFetcher parses RSS XML format correctly."""
-    xml_data = """<?xml version="1.0" encoding="UTF-8"?>
-    <rss version="2.0">
-      <channel>
-        <title>ENPI Official</title>
-        <item>
-          <title>Nouveau projet Boumerdes</title>
-          <description>Vente de logements LPL disponibles</description>
-          <link>https://facebook.com/ENPI.dz/posts/999</link>
-          <guid>guid_999</guid>
-          <pubDate>Mon, 26 Sep 2026 12:00:00 GMT</pubDate>
-        </item>
-      </channel>
-    </rss>"""
-    fb = m.FacebookFetcher()
-    fb.rss_url = "https://mock-rss.local/feed"
-    fb._client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, text=xml_data)))
-    posts = fb.fetch_posts()
-    assert len(posts) == 1
-    assert posts[0]["id"] == "guid_999"
-    assert "Boumerdes" in posts[0]["text"]
-    assert "https://facebook.com/ENPI.dz/posts/999" in posts[0]["url"]
-
-
 def test_status_change_detection():
     """Project status changes trigger a STATUS_CHANGE alert."""
     old_snap = {
@@ -566,10 +510,10 @@ def test_status_change_detection():
                 "id": "9",
                 "label": "9 - Blida",
                 "projects": {
-                    "12 villas mouzaia": {
-                        "label": "12 Villas Mouzaia",
+                    "120 logts blida": {
+                        "label": "120 Logts Blida",
                         "status": "0",
-                        "typologies": {"f5": "F5"}
+                        "typologies": {"f4": "F4"}
                     }
                 }
             }
@@ -581,10 +525,10 @@ def test_status_change_detection():
                 "id": "9",
                 "label": "9 - Blida",
                 "projects": {
-                    "12 villas mouzaia": {
-                        "label": "12 Villas Mouzaia",
+                    "120 logts blida": {
+                        "label": "120 Logts Blida",
                         "status": "10",
-                        "typologies": {"f5": "F5"}
+                        "typologies": {"f4": "F4"}
                     }
                 }
             }
@@ -593,64 +537,98 @@ def test_status_change_detection():
     trusted, events, counters, baseline = m.reconcile(old_snap, new_snap, set(), {}, "LPL")
     assert len(events) == 1
     assert events[0]["type"] == "STATUS_CHANGE"
-    assert events[0]["project"] == "12 Villas Mouzaia"
+    assert events[0]["project"] == "120 Logts Blida"
     assert "Statut: 0 -> 10" in events[0]["new_typologies"]
 
 
-def test_telegram_multi_account_broadcast():
-    """All registered subscriber accounts receive future alerts."""
+def test_telegram_single_recipient_hamza():
+    """Telegram notifications are locked strictly to Hamza Riadh (8794217005)."""
     notifier = m.Notifier()
-    notifier.telegram_token = "123456:FAKE_TOKEN"
-    notifier.telegram_chats = ["8794217005"]
-
     state = {
         "telegram_subscribers": ["8794217005", "1997851827", "6973643382", "1210000046", "8832976340"],
         "telegram_last_update_id": 0
     }
     active_chats = notifier.sync_telegram_subscribers(state)
 
-    assert len(active_chats) == 5
-    assert "8794217005" in active_chats
-    assert "1997851827" in active_chats
-    assert "8832976340" in active_chats
+    assert active_chats == ["8794217005"]
+    assert state["telegram_subscribers"] == ["8794217005"]
 
 
-
-def test_esports_noise_filtering():
-    """Esports news items with 'League of Legends' or 'esports' are completely filtered out."""
-    fb = m.FacebookFetcher()
-    noise_posts = [
-        {"id": "1", "text": "LPL saison 2026 : finales régionales League of Legends Weibo Gaming"},
-        {"id": "2", "text": "Edward Gaming vs Bilibili Gaming LPL 2026 esports match"},
-        {"id": "3", "text": "Logement LPL Blida : ouverture des inscriptions pour les villas Mouzaia"}
-    ]
-    relevant = fb.filter_relevant(noise_posts, [])
-    assert len(relevant) == 1
-    assert "Blida" in relevant[0]["text"]
-
-
-def test_outdated_news_items_filtered_out():
-    """Posts from 2024 or older than 72 hours are strictly rejected."""
-    fb = m.FacebookFetcher()
-    posts = [
-        {
-            "id": "old_2024",
-            "text": "Logement LPL Blida : ouverture des inscriptions villas",
-            "date": "Mon, 26 Feb 2024 13:11:19 GMT"
-        },
-        {
-            "id": "recent_2026",
-            "text": "Logement LPL Blida : ouverture des inscriptions villas Mouzaia",
-            "date": "Tue, 29 Sep 2026 12:00:00 GMT"
+def test_is_apartment_opportunity_accepts_f3_f4_f5_f6():
+    """Projects with F3, F4, F5, or F6 typologies are recognized as apartment opportunities."""
+    for typo in ["F3", "F4", "F5", "F6"]:
+        ev = {
+            "type": "OPPORTUNITY",
+            "program": "LPL",
+            "wilaya": "16 - Alger",
+            "project": "150 Logements Sidi Abdellah",
+            "typologies": [typo],
+            "new_typologies": [typo]
         }
+        assert m.is_apartment_opportunity(ev) is True
+
+
+def test_is_apartment_opportunity_rejects_villas():
+    """Projects containing 'villa' or 'villas' in French or Arabic are strictly rejected."""
+    villa_projects = [
+        "15 VILLAS LARBAA",
+        "20 villas lpl larbaa",
+        "12 Villas Mouzaia",
+        "06 Villas Ouled Yaich",
+        "20 فيلا الأربعاء",
+        "مشروع 15 فيلات موزاية"
     ]
-    relevant = fb.filter_relevant(posts, [])
-    assert len(relevant) == 1
-    assert relevant[0]["id"] == "recent_2026"
+    for proj in villa_projects:
+        # Even if they declare F5 or F6 typologies, villas MUST be rejected!
+        ev = {
+            "type": "OPPORTUNITY",
+            "program": "LPL",
+            "wilaya": "9 - Blida",
+            "project": proj,
+            "typologies": ["F5", "F6"],
+            "new_typologies": ["F5", "F6"]
+        }
+        assert m.is_apartment_opportunity(ev) is False, f"Expected {proj} to be rejected as villa"
 
 
-def test_apartment_target_detection_highlights_f3_f4_f5():
-    """Projects with F3, F4, or F5 typologies receive prominent apartment highlights and priority 5."""
+def test_is_apartment_opportunity_rejects_non_target_typologies():
+    """Commercial units and non-target typologies (e.g. F7, F8, Local) are rejected."""
+    ev = {
+        "type": "OPPORTUNITY",
+        "program": "LPL",
+        "wilaya": "35 - Boumerdes",
+        "project": "Projet Commercial Centre",
+        "typologies": ["LOCAL", "BUREAU", "F7"],
+        "new_typologies": ["LOCAL"]
+    }
+    assert m.is_apartment_opportunity(ev) is False
+
+
+def test_is_apartment_opportunity_handles_pending_types_and_wilayas():
+    """New wilaya opening or new project without loaded typologies are treated as opportunities."""
+    new_w = {
+        "type": "NEW_WILAYA",
+        "program": "LPL",
+        "wilaya": "16 - Alger",
+        "project": None,
+        "typologies": [],
+        "new_typologies": []
+    }
+    assert m.is_apartment_opportunity(new_w) is True
+
+    new_p = {
+        "type": "NEW_PROJECT",
+        "program": "LPL",
+        "wilaya": "42 - Tipaza",
+        "project": "120 Logements Kolea",
+        "typologies": [],
+        "new_typologies": []
+    }
+    assert m.is_apartment_opportunity(new_p) is True
+
+
+def test_apartment_target_detection_highlights_f3_f4_f5_f6():
+    """Projects with target typologies receive prominent apartment highlights and priority 5."""
     events = [{
         "type": "OPPORTUNITY",
         "program": "LPL",
@@ -669,7 +647,7 @@ def test_apartment_target_detection_highlights_f3_f4_f5():
 
 
 def test_villa_detected_displays_villa_category():
-    """Projects exclusively with villas are noted with villa category."""
+    """When a villa event is processed directly by _make_alert_item, it receives villa category."""
     events = [{
         "type": "OPPORTUNITY",
         "program": "LPL",
@@ -682,10 +660,28 @@ def test_villa_detected_displays_villa_category():
     alert = m._make_alert_item(events, "https://www.enpi-net.dz/LPL/", now)
 
     assert alert["title"].startswith("🚨🚨 ENPI")
-    assert "Villa" in alert["body"]
+    assert "Catégorie : Villa" in alert["body"]
 
 
+def test_run_once_filters_villas_and_alerts_apartments():
+    """run_once filters out villas and alerts on apartments."""
+    # 1. Setup baseline
+    env = Env()
+    env.run()
+    assert env.state["snapshots"]["LPL"] is not None
+    env.notifier.sent.clear()
 
+    # 2. Add a new villa (15 Villas Larbaa) -> Should NOT produce an alert
+    env.site.data["9 - blida"]["15 Villas Larbaa"] = ["F6"]
+    env.run()
+    # No new alert should be sent for the villa
+    assert len(env.sent) == 0
 
-
-
+    # 3. Add a new apartment project (200 Logts Sidi Abdellah) -> Should produce an alert
+    env.site.data["16 - alger"]["200 Logts Sidi Abdellah"] = ["F3", "F4"]
+    env.run()
+    assert len(env.sent) == 1
+    sent_alert = env.sent[0]
+    assert "APPARTEMENT" in sent_alert["title"]
+    assert sent_alert["priority"] == 5
+    assert "200 Logts Sidi Abdellah" in sent_alert["body"]
