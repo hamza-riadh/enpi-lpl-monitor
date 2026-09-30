@@ -390,12 +390,6 @@
     }
   },
   "telegram_last_update_id": 333753644,
-  "telegram_subscribers": [
-    "8794217005",
-    "1997851827",
-    "6973643382",
-    "1210000046",
-    "8832976340"
-  ],
+  "telegram_subscribers": [],
   "version": 2
 }

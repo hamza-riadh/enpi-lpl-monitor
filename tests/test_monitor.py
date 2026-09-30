@@ -330,6 +330,17 @@ def test_state_not_written_when_unchanged(tmp_path):
     assert m.save_state(p, e.state) is True
 
 
+def test_save_state_never_persists_telegram_chat_ids(tmp_path):
+    """save_state strips telegram_subscribers so chat IDs are never written to disk or public git."""
+    p = tmp_path / "state.json"
+    state = m._empty_state()
+    state["telegram_subscribers"] = ["8794217005", "1997851827", "6973643382"]
+    assert m.save_state(p, state, force=True) is True
+    disk_data = json.loads(p.read_text())
+    assert disk_data["telegram_subscribers"] == []
+
+
+
 def test_norm_accent_fold():
     assert m.norm("  TIPAZA  ") == "tipaza"
     assert m.norm("Boumerdès")  == m.norm("BOUMERDES")

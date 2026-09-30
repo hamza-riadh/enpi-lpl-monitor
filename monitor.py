@@ -520,7 +520,7 @@ def load_state(path: Path) -> dict:
 
 
 def save_state(path: Path, state: dict, force=False) -> bool:
-    material = lambda s: {k: v for k, v in s.items() if k not in EPHEMERAL_KEYS}
+    material = lambda s: {k: v for k, v in s.items() if k not in EPHEMERAL_KEYS and k != "telegram_subscribers"}
     if path.exists():
         on_disk = load_state(path)
         stale = False
@@ -530,8 +530,11 @@ def save_state(path: Path, state: dict, force=False) -> bool:
         if not (force or material(on_disk) != material(state) or stale):
             return False
     state["saved_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    # Never write private Telegram subscriber Chat IDs to public git repository
+    disk_state = copy.deepcopy(state)
+    disk_state["telegram_subscribers"] = []
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    tmp.write_text(json.dumps(disk_state, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     tmp.replace(path)
     return True
 
