@@ -262,8 +262,9 @@ def test_mass_disappearance_not_believed():
     assert e.state["snapshot"] is not None   # trusted data retained
 
 
-def test_website_down_keeps_snapshot():
+def test_website_down_keeps_snapshot(monkeypatch):
     """Connection failure retains trusted snapshot, alerts after threshold."""
+    monkeypatch.setattr(m, "FAILURE_ALERT_AFTER", 3)
     e = Env()
     e.run(); e.sent.clear()
     snap_before = json.dumps(e.state["snapshot"], sort_keys=True)
@@ -488,35 +489,35 @@ def test_multi_engine_lpl_and_lpp():
     assert any("LPP" in alert["title"] for alert in notifier.sent)
 
 
-def test_resilience_lpl_down_lpp_continues():
-    """If LPL fails, LPP continues scanning and alerting normally."""
-    site_lpl = FakeSite()
-    site_lpp = FakeSite()
-    site_lpl.mode = "down"
+    def test_resilience_lpl_down_lpp_continues():
+        """If LPL fails, LPP continues scanning and alerting normally."""
+        site_lpl = FakeSite()
+        site_lpp = FakeSite()
+        site_lpl.mode = "down"
 
-    client_lpl = httpx.Client(transport=httpx.MockTransport(site_lpl.handler))
-    client_lpp = httpx.Client(transport=httpx.MockTransport(site_lpp.handler))
+        client_lpl = httpx.Client(transport=httpx.MockTransport(site_lpl.handler))
+        client_lpp = httpx.Client(transport=httpx.MockTransport(site_lpp.handler))
 
-    fetcher_lpl = m.EnpiFetcher("LPL")
-    fetcher_lpl._open_session = lambda: (client_lpl, CSRF)
-    fetcher_lpp = m.EnpiFetcher("LPP")
-    fetcher_lpp._open_session = lambda: (client_lpp, CSRF)
+        fetcher_lpl = m.EnpiFetcher("LPL")
+        fetcher_lpl._open_session = lambda: (client_lpl, CSRF)
+        fetcher_lpp = m.EnpiFetcher("LPP")
+        fetcher_lpp._open_session = lambda: (client_lpp, CSRF)
 
-    notifier = FakeNotifier()
-    state = m._empty_state()
+        notifier = FakeNotifier()
+        state = m._empty_state()
 
-    # Scan should not crash, LPP gets baseline
-    m.run_once(state, {"LPL": fetcher_lpl, "LPP": fetcher_lpp}, notifier)
-    assert state["snapshots"]["LPL"] is None
-    assert state["snapshots"]["LPP"] is not None
-    assert state["failures_by_program"]["LPL"] == 1
-    assert state["failures_by_program"]["LPP"] == 0
+        # Scan should not crash, LPP gets baseline
+        m.run_once(state, {"LPL": fetcher_lpl, "LPP": fetcher_lpp}, notifier)
+        assert state["snapshots"]["LPL"] is None
+        assert state["snapshots"]["LPP"] is not None
+        assert state["failures_by_program"]["LPL"] == 1
+        assert state["failures_by_program"]["LPP"] == 0
 
 
-def test_status_change_detection():
-    """Project status changes trigger a STATUS_CHANGE alert."""
-    old_snap = {
-        "wilayas": {
+    def test_status_change_detection():
+        """Project status changes trigger a STATUS_CHANGE alert."""
+        old_snap = {
+            "wilayas": {
             "9 - blida": {
                 "id": "9",
                 "label": "9 - Blida",
@@ -716,3 +717,28 @@ def test_run_once_filters_villas_and_alerts_apartments():
     assert "APPARTEMENT" in sent_alert["title"]
     assert sent_alert["priority"] == 5
     assert "200 Logts Sidi Abdellah" in sent_alert["body"]
+
+
+def test_temporary_failures_do_not_spam_telegram_or_churn_state(tmp_path):
+    """Temporary glitches (<30 min) do not alert Telegram and do not cause git commit churn."""
+    p = tmp_path / "state.json"
+    env = Env()
+    env.run()
+    assert m.save_state(p, env.state) is True
+    env.sent.clear()
+
+    # Simulate 5 minutes of temporary DNS / network failure
+    env.site.mode = "down"
+    for _ in range(5):
+        env.run()
+        # No telegram alert sent for temporary failure
+        assert len(env.sent) == 0
+        # save_state returns False because failure counters are ephemeral
+        assert m.save_state(p, env.state) is False
+
+    # Site recovers
+    env.site.mode = "ok"
+    env.run()
+    assert len(env.sent) == 0
+    assert env.state["consecutive_failures"] == 0
+

@@ -69,6 +69,9 @@ jobs:
           # ── Dead-man's switch (optional, free at healthchecks.io) ──
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
 
+          # ── Alert Thresholds (Only alert Telegram after 30 min permanent outage) ──
+          FAILURE_ALERT_AFTER: "30"
+
         run: python monitor.py
 
       # Commit state.json ONLY when it actually changed.
@@ -83,7 +86,7 @@ jobs:
             git add state.json
             git commit -m "state: update snapshot [skip ci]"
             git pull --rebase --autostash -q || true
-            git push || (sleep 5 && git pull --rebase -q && git push)
+            git push || (sleep 5 && git pull --rebase -q && git push) || echo "Push skipped due to transient git conflict — state preserved for next run"
           else
             echo "No state change — nothing to commit"
           fi

@@ -83,7 +83,7 @@ DEFAULT_TARGET_TYPOLOGIES = ["F3", "F4", "F5", "F6"]
 REMOVAL_CONFIRMATIONS = 2
 MASS_REMOVAL_RATIO    = 0.5
 MASS_CONFIRMATIONS    = 6
-FAILURE_ALERT_AFTER   = 3
+FAILURE_ALERT_AFTER   = int(os.getenv("FAILURE_ALERT_AFTER", "30"))
 HEARTBEAT_HOURS       = 12
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/133.0.0.0 Safari/537.36"
@@ -454,7 +454,10 @@ def reconcile(old, new, failed, counters, program="LPL"):
 # ─────────────────────────────────────────────────────────────────
 # STATE PERSISTENCE (LPL + LPP)
 # ─────────────────────────────────────────────────────────────────
-EPHEMERAL_KEYS = ("last_success", "last_attempt", "saved_at", "last_success_by_program")
+EPHEMERAL_KEYS = (
+    "last_success", "last_attempt", "saved_at", "last_success_by_program",
+    "consecutive_failures", "failures_by_program", "failure_alerted", "failure_alerted_by_program"
+)
 
 
 def _empty_state():
