@@ -489,35 +489,36 @@ def test_multi_engine_lpl_and_lpp():
     assert any("LPP" in alert["title"] for alert in notifier.sent)
 
 
-    def test_resilience_lpl_down_lpp_continues():
-        """If LPL fails, LPP continues scanning and alerting normally."""
-        site_lpl = FakeSite()
-        site_lpp = FakeSite()
-        site_lpl.mode = "down"
 
-        client_lpl = httpx.Client(transport=httpx.MockTransport(site_lpl.handler))
-        client_lpp = httpx.Client(transport=httpx.MockTransport(site_lpp.handler))
+def test_resilience_lpl_down_lpp_continues():
+    """If LPL fails, LPP continues scanning and alerting normally."""
+    site_lpl = FakeSite()
+    site_lpp = FakeSite()
+    site_lpl.mode = "down"
 
-        fetcher_lpl = m.EnpiFetcher("LPL")
-        fetcher_lpl._open_session = lambda: (client_lpl, CSRF)
-        fetcher_lpp = m.EnpiFetcher("LPP")
-        fetcher_lpp._open_session = lambda: (client_lpp, CSRF)
+    client_lpl = httpx.Client(transport=httpx.MockTransport(site_lpl.handler))
+    client_lpp = httpx.Client(transport=httpx.MockTransport(site_lpp.handler))
 
-        notifier = FakeNotifier()
-        state = m._empty_state()
+    fetcher_lpl = m.EnpiFetcher("LPL")
+    fetcher_lpl._open_session = lambda: (client_lpl, CSRF)
+    fetcher_lpp = m.EnpiFetcher("LPP")
+    fetcher_lpp._open_session = lambda: (client_lpp, CSRF)
 
-        # Scan should not crash, LPP gets baseline
-        m.run_once(state, {"LPL": fetcher_lpl, "LPP": fetcher_lpp}, notifier)
-        assert state["snapshots"]["LPL"] is None
-        assert state["snapshots"]["LPP"] is not None
-        assert state["failures_by_program"]["LPL"] == 1
-        assert state["failures_by_program"]["LPP"] == 0
+    notifier = FakeNotifier()
+    state = m._empty_state()
+
+    # Scan should not crash, LPP gets baseline
+    m.run_once(state, {"LPL": fetcher_lpl, "LPP": fetcher_lpp}, notifier)
+    assert state["snapshots"]["LPL"] is None
+    assert state["snapshots"]["LPP"] is not None
+    assert state["failures_by_program"]["LPL"] == 1
+    assert state["failures_by_program"]["LPP"] == 0
 
 
-    def test_status_change_detection():
-        """Project status changes trigger a STATUS_CHANGE alert."""
-        old_snap = {
-            "wilayas": {
+def test_status_change_detection():
+    """Project status changes trigger a STATUS_CHANGE alert."""
+    old_snap = {
+        "wilayas": {
             "9 - blida": {
                 "id": "9",
                 "label": "9 - Blida",
@@ -741,4 +742,33 @@ def test_temporary_failures_do_not_spam_telegram_or_churn_state(tmp_path):
     env.run()
     assert len(env.sent) == 0
     assert env.state["consecutive_failures"] == 0
+
+
+def test_system_failure_routed_only_to_email_never_telegram(monkeypatch):
+    """Technical server outages are sent to Email only, never to Telegram."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:FAKE_TOKEN")
+    monkeypatch.setenv("TELEGRAM_CHAT_IDS", "8794217005")
+    monkeypatch.setenv("EMAIL_TO", "admin@example.com")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+
+    notifier = m.Notifier()
+
+    tg_calls = []
+    email_calls = []
+
+    notifier._telegram = lambda item: tg_calls.append(item) or True
+    notifier._email = lambda item: email_calls.append(item) or True
+
+    # 1. System failure item (prolonged outage)
+    fail_item = m._simple_item("ENPI LPL MONITORING FAILURE", "Outage details", priority=4, category="system")
+    assert notifier.send(fail_item) is True
+    assert len(tg_calls) == 0         # STRICTLY zero Telegram messages
+    assert len(email_calls) == 1      # Sent to Email
+
+    # 2. Housing opportunity item
+    opp_item = {"title": "🏢🚨 ENPI LPL — OPPORTUNITE APPARTEMENT (F3, F4)", "body": "150 Logts", "category": "housing"}
+    assert notifier.send(opp_item) is True
+    assert len(tg_calls) == 1         # Telegram notified for housing opportunity
+    assert len(email_calls) == 2      # Email also notified as broadcast channel
+
 

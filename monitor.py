@@ -625,11 +625,11 @@ def _make_alert_item(events, official_url, now):
     if len(events) > 1:
         title_str += f" (+{len(events) - 1})"
     return {"title": title_str, "body": body, "priority": priority,
-            "tags": tags, "click": official_url}
+            "tags": tags, "click": official_url, "category": "housing"}
 
 
-def _simple_item(title, body, priority=3, tags=("warning",), click=""):
-    return {"title": title, "body": body, "priority": priority, "tags": list(tags), "click": click}
+def _simple_item(title, body, priority=3, tags=("warning",), click="", category="system"):
+    return {"title": title, "body": body, "priority": priority, "tags": list(tags), "click": click, "category": category}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -722,6 +722,15 @@ class Notifier:
         )
 
     def send(self, item):
+        category = item.get("category", "housing")
+        if category == "system":
+            # Technical server outages / failures are strictly routed to Email ONLY (if configured)
+            # Telegram, WhatsApp, and mobile push are 100% reserved for real housing opportunities
+            log.info("[ALERT] Technical outage alert routed exclusively to Email: %s", item.get("title"))
+            if self.email_to and self.smtp_host:
+                return self._email(item)
+            return True  # Dismiss cleanly if email is not configured
+
         return any([
             self._telegram(item),
             self._ntfy(item),
@@ -730,6 +739,11 @@ class Notifier:
         ])
 
     def _telegram(self, item):
+        # Strict rule: NEVER broadcast server outages, DNS glitches, or diagnostic messages to Telegram
+        if item.get("category") == "system" or "FAILURE" in (item.get("title") or "").upper() or "RECOVERED" in (item.get("title") or "").upper() or "DEMARRE" in (item.get("title") or "").upper():
+            log.info("[ALERT] Skipping Telegram for technical alert: %s", item.get("title"))
+            return True
+
         if not (self.telegram_token and self.telegram_chats):
             return False
         title_html = (item.get("title") or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
