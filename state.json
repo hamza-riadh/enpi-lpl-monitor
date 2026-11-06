@@ -1,15 +1,15 @@
 {
-  "consecutive_failures": 28,
+  "consecutive_failures": 29,
   "failure_alerted": false,
   "failure_alerted_by_program": {
     "LPL": false,
     "LPP": false
   },
   "failures_by_program": {
-    "LPL": 28,
-    "LPP": 28
+    "LPL": 29,
+    "LPP": 29
   },
-  "last_attempt": "2026-11-05T20:05:11+01:00",
+  "last_attempt": "2026-11-06T08:05:33+01:00",
   "last_success": "2026-10-22T18:56:11+01:00",
   "last_success_by_program": {
     "LPL": "2026-10-22T18:56:11+01:00",
@@ -20,7 +20,7 @@
     "LPP": {}
   },
   "pending": [],
-  "saved_at": "2026-11-05T20:07:57+01:00",
+  "saved_at": "2026-11-06T08:08:20+01:00",
   "seen_fb_posts": [],
   "snapshot": {
     "wilayas": {
