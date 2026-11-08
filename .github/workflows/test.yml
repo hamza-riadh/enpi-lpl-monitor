@@ -1,6 +1,7 @@
 name: Run Tests
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "**.py"
@@ -13,7 +14,7 @@ on:
 
 jobs:
   test:
-    name: Run Unit Tests
+    name: Run Unit Tests & Live Connectivity
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -28,5 +29,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run test suite
+      - name: Run unit test suite
         run: python -m pytest tests/test_monitor.py -v
+
+      - name: Cache WARP WireGuard profile
+        id: warp-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.warp-wireguard
+          key: warp-wireguard-${{ runner.os }}-v1
+
+      - name: Start Cloudflare WARP Split-Tunnel
+        run: python setup_warp.py
+
+      - name: Verify Live ENPI Connectivity through Tunnel
+        run: |
+          echo "Testing direct connection to Algerian ENPI portal through Cloudflare Anycast..."
+          python monitor.py --discover
+          python monitor.py --dry-run
