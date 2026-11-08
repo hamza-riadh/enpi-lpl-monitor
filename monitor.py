@@ -48,7 +48,11 @@ from bs4 import BeautifulSoup
 
 log = logging.getLogger("enpi")
 ROOT = Path(__file__).resolve().parent
-TZ = ZoneInfo("Africa/Algiers")
+try:
+    TZ = ZoneInfo("Africa/Algiers")
+except Exception:
+    from datetime import timezone, timedelta
+    TZ = timezone(timedelta(hours=1))  # Algiers is permanently UTC+1 (no DST)
 
 # ─────────────────────────────────────────────────────────────────
 # PROGRAM CONFIGURATIONS (LPL & LPP)
