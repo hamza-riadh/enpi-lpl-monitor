@@ -8,14 +8,14 @@ Watches for new apartment opportunities (F3, F4, F5, F6) in **Alger (16), Tipaza
 Strictly filters out and rejects villas (e.g. Larbaâ, Mouzaia).
 Sends instant alerts via **Telegram Bot** (with clickable direct buttons), **ntfy** push, **WhatsApp**, and **Email**.
 
-**100% Free. No VPS. Runs on GitHub Actions ~every 5 minutes.**
+**100% Free. No VPS. Runs 24/7 directly from Algeria (Termux / Linux) every 60 seconds to bypass foreign IP geoblocking.**
 
 ---
 
 ## Architecture & Detection Pipeline
 
 ```
-Every ~5 minutes (GitHub Actions / cron-job.org)
+Every 60 seconds (Termux / Local Linux loop)
   ↓
 1. Scan LPL Portal:
    GET  https://www.enpi-net.dz/LPL/Inscription.php?lang=fr
@@ -44,29 +44,33 @@ Every ~5 minutes (GitHub Actions / cron-job.org)
 
 ---
 
-## Multi-Channel Alert Configuration
+## Multi-Channel Alert Configuration (`.env`)
+
+Configure your credentials in a local `.env` file (see `.env.example`):
 
 ### 1. Telegram Bot (Instant & 100% Free)
 - Create a bot via [@BotFather](https://t.me/BotFather) and get `TELEGRAM_BOT_TOKEN`.
 - Send `/start` to your bot.
 - Get your `chat_id` via `@userinfobot`.
-- Add to GitHub Secrets:
-  - `TELEGRAM_BOT_TOKEN`: `1234567890:ABCDefGhIJKlmNoPQRsTUVwxyZ`
-  - `TELEGRAM_CHAT_IDS`: `123456789` (or comma-separated for multiple accounts)
+- Add to `.env`:
+  ```env
+  TELEGRAM_BOT_TOKEN=1234567890:ABCDefGhIJKlmNoPQRsTUVwxyZ
+  TELEGRAM_CHAT_IDS=123456789
+  ```
 
 ### 2. ntfy Push Notifications
 - Install **ntfy** app on Android or iOS.
 - Subscribe to your private topic.
-- Add `NTFY_TOPIC` to GitHub Secrets.
+- Add `NTFY_TOPIC` to `.env`.
 
 ### 3. WhatsApp (CallMeBot)
-- Add `WHATSAPP_TARGETS` formatted as `+213555123456:apikey` in GitHub Secrets.
+- Add `WHATSAPP_TARGETS` formatted as `+213555123456:apikey` in `.env`.
 
 ---
 
-## GitHub Secrets Checklist
+## Environment Variables Checklist
 
-| Secret Name          | Description                                    | Status   |
+| Variable             | Description                                    | Status   |
 |----------------------|------------------------------------------------|----------|
 | `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather                  | ✅ Recommended |
 | `TELEGRAM_CHAT_IDS`  | Comma-separated Telegram Chat IDs              | ✅ Recommended |
@@ -112,15 +116,15 @@ Donnees precedentes conservees.
 
 ## Customise Targets
 
-Edit `TARGET_WILAYAS` in the workflow file (or GitHub Secret):
+Set `TARGET_WILAYAS` in `.env`:
 
-```yaml
-TARGET_WILAYAS: "Alger,Tipaza,Blida,Boumerdes"
+```env
+TARGET_WILAYAS=Alger,Tipaza,Blida,Boumerdes
 ```
 
 Or monitor everything:
-```yaml
-MONITOR_ALL_WILAYAS: "true"
+```env
+MONITOR_ALL_WILAYAS=true
 ```
 
 ---
@@ -132,10 +136,9 @@ MONITOR_ALL_WILAYAS: "true"
 | "CSRF token not found" | Site layout changed | Open `python monitor.py --discover` |
 | "wilaya select not found" | Same | Same |
 | "Only N wilayas found" | Site downtime | Wait and retry |
-| ntfy not received | Wrong topic name | Check `NTFY_TOPIC` secret |
+| ntfy not received | Wrong topic name | Check `NTFY_TOPIC` in `.env` |
 | Email fails | Wrong app password | Gmail → Manage Account → Security → App Passwords |
-| Actions not running | Repo inactive 60+ days | Push a commit or use workflow_dispatch |
-| Actions delayed | GitHub load | Normal — expect ~5-10 min, not exactly 5 |
+| Connection timeout (`ConnectTimeout`) | Running from non-Algerian IP | Run directly inside Algeria (e.g., Termux on home Wi-Fi) |
 
 ---
 
@@ -143,7 +146,7 @@ MONITOR_ALL_WILAYAS: "true"
 
 ENPI posts new apartment quotas directly to the official registration portals (LPL & LPP) before any social media announcements. Facebook announcements often lag by 20 to 60+ minutes and heavily feature slow-moving villa projects (e.g. Larbaâ, Mouzaia) that were already listed.
 
-By querying the official portal APIs directly every 5 minutes:
+By querying the official portal APIs directly every 60 seconds:
 1. **Zero Social Media Latency:** Instant detection the second a quota or apartment project opens.
 2. **Strict Typology Filtering:** Only apartments (**F3, F4, F5, F6**) in the 4 target wilayas (Alger, Tipaza, Blida, Boumerdes) trigger alerts.
 3. **No Noise / No Villas:** Villa projects are automatically filtered out.
@@ -155,9 +158,8 @@ By querying the official portal APIs directly every 5 minutes:
 | Question | Decision | Reason |
 |----------|----------|--------|
 | Playwright / Selenium? | ❌ Not used | Portals use clean AJAX endpoints — lightweight HTTP requests are 50x faster and never get blocked |
-| Database? | ❌ Not used | `state.json` Git-backed atomic state is 100% reliable and zero-cost |
-| VPS? | ❌ Not used | GitHub Actions + cron-job.org handles 24/7 execution |
+| Database? | ❌ Not used | `state.json` atomic JSON state is 100% reliable and zero-cost |
+| Cloud / VPS? | ❌ Not used | Foreign datacenter IPs are geoblocked by Algérie Télécom; local Algerian Termux/Linux execution connects natively in ~5s |
 | Session handling | ✅ Fresh per run | CSRF tokens + PHP session cookies obtained dynamically per scan |
-| State commit strategy | Only on change | Avoids pointless commits; preserves GitHub API quota |
 | Filtering | Apartments F3-F6 | Villas and commercial premises are strictly excluded |
 
